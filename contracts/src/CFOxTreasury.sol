@@ -14,6 +14,11 @@ contract CFOxTreasury is ICFOxTreasury {
     bool private _paused;
     string public pauseReason;
 
+    /// @notice Factory that deployed this treasury. Used for one-shot token setup.
+    address public immutable factory;
+    /// @notice True once setupAllowedToken() has been called by the factory.
+    bool public tokenSetupDone;
+
     /// @dev address(0) represents the native token (ETH/CELO/etc)
     mapping(address => bool) private _allowedTokens;
 
@@ -31,9 +36,14 @@ contract CFOxTreasury is ICFOxTreasury {
 
     // ─── Constructor ──────────────────────────────────────────────────────────
 
-    constructor(address _governance) {
+    /// @param _governance  The CFOxGovernance contract address.
+    /// @param _factory     The CFOxFactory that deployed this contract (may be
+    ///                     address(0) for direct/test deployments — in that case
+    ///                     setupAllowedToken is permanently disabled).
+    constructor(address _governance, address _factory) {
         if (_governance == address(0)) revert ZeroAddress();
         governance = _governance;
+        factory = _factory;
         // Native token always allowed
         _allowedTokens[address(0)] = true;
         emit GovernanceSet(_governance);
@@ -84,6 +94,21 @@ contract CFOxTreasury is ICFOxTreasury {
 
     // ─── Admin ────────────────────────────────────────────────────────────────
 
+    /// @notice One-shot initial token whitelist called by the factory at deploy time.
+    ///         Can never be called again once tokenSetupDone is true.
+    ///         Only callable by the factory address set at construction.
+    function setupAllowedToken(address token) external override {
+        require(
+            msg.sender == factory && factory != address(0) && !tokenSetupDone,
+            "Not allowed"
+        );
+        tokenSetupDone = true;
+        _allowedTokens[token] = true;
+        emit AllowedTokenSet(token, true);
+    }
+
+    /// @notice Add or remove an allowed token via governance proposal.
+    ///         Use this after initial deploy to whitelist additional tokens (e.g. WETH, cUSD).
     function setAllowedToken(address token, bool allowed) external override onlyGovernance {
         _allowedTokens[token] = allowed;
         emit AllowedTokenSet(token, allowed);
@@ -101,7 +126,7 @@ contract CFOxTreasury is ICFOxTreasury {
         emit Unpaused(msg.sender);
     }
 
-    /// @notice Transfer governance to a new address (requires a governance proposal)
+    /// @notice Transfer governance to a new address (requires a governance proposal).
     function setGovernance(address _governance) external override onlyGovernance {
         if (_governance == address(0)) revert ZeroAddress();
         governance = _governance;
@@ -127,13 +152,11 @@ contract CFOxTreasury is ICFOxTreasury {
 
     function _transfer(address token, address recipient, uint256 amount) internal {
         if (token == address(0)) {
-            // Native token
             uint256 bal = address(this).balance;
             if (bal < amount) revert InsufficientBalance(bal, amount);
             (bool ok,) = payable(recipient).call{value: amount}("");
             if (!ok) revert TransferFailed();
         } else {
-            // ERC20 — use low-level call to support non-standard tokens
             uint256 bal = _erc20BalanceOf(token, address(this));
             if (bal < amount) revert InsufficientBalance(bal, amount);
 

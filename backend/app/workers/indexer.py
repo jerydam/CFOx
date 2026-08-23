@@ -18,7 +18,7 @@ from decimal import Decimal
 from web3 import Web3
 from web3.middleware import ExtraDataToPOAMiddleware
 
-from .db_service import TreasuryDB, get_db
+from ..services.db_service import TreasuryDB, get_db
 
 log = logging.getLogger("indexer")
 

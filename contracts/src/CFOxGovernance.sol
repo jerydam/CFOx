@@ -140,7 +140,10 @@ contract CFOxGovernance is ICFOxGovernance {
         proposalId = _createProposal(ProposalType.PAYMENT, requiredWeight, callData, description);
     }
 
-    /// @notice Propose adding a new member with equity transferred from an existing member.
+    /// @notice Propose adding a new member with equity transferred FROM the caller.
+    /// @param newMember  Address of the new member.
+    /// @param weight     Basis-point weight to allocate (deducted from caller's equity).
+    /// @param role       Display role string.
     function createAddMemberProposal(
         address newMember,
         uint256 weight,
@@ -149,13 +152,15 @@ contract CFOxGovernance is ICFOxGovernance {
         require(newMember != address(0), "Zero address");
         require(weight > 0 && weight < TOTAL_WEIGHT, "Invalid weight");
         require(!_members[newMember].active, "Already member");
+        require(_members[msg.sender].weight >= weight, "Insufficient weight");
 
-        bytes memory callData = abi.encode(newMember, weight, role);
+        // Encode the proposer (from) so _addMember can deduct correctly
+        bytes memory callData = abi.encode(msg.sender, newMember, weight, role);
         // Adding members requires 70% governance threshold
         proposalId = _createProposal(ProposalType.ADD_MEMBER, 7_000, callData, role);
     }
 
-    /// @notice Propose removing a member (marks inactive, equity goes to proposer).
+    /// @notice Propose removing a member (marks inactive, equity goes to first remaining member).
     function createRemoveMemberProposal(
         address member
     ) external override onlyActiveMember returns (uint256 proposalId) {
@@ -285,9 +290,10 @@ contract CFOxGovernance is ICFOxGovernance {
             treasury.execute(token, recipient, amount);
 
         } else if (pType == ProposalType.ADD_MEMBER) {
-            (address newMember, uint256 weight, string memory role) =
-                abi.decode(callData, (address, uint256, string));
-            _addMember(newMember, weight, role);
+            // callData: (from, newMember, weight, role)
+            (address from, address newMember, uint256 weight, string memory role) =
+                abi.decode(callData, (address, address, uint256, string));
+            _addMember(from, newMember, weight, role);
 
         } else if (pType == ProposalType.REMOVE_MEMBER) {
             (address member) = abi.decode(callData, (address));
@@ -302,42 +308,31 @@ contract CFOxGovernance is ICFOxGovernance {
 
     // ─── Internal Governance Mutations ────────────────────────────────────────
 
-    function _addMember(address newMember, uint256 weight, string memory role) internal {
-        // The proposer's equity is reduced by the allocated weight
-        // Find who is the founder/dominant member to take from?
-        // Per spec: the equity comes from the proposer.
-        // But we enforce total = 10000, so the contract takes weight from treasury of unallocated.
-        // In practice: proposal must specify FROM address. For MVP, we take from proposer.
-        // NOTE: The proposal flow should encode both "from" and "to" for clarity.
-        // Here we trust the governance that weight was validated at proposal creation.
-
+    /// @dev Weight is deducted from `from` and assigned to `newMember`.
+    ///      Total weight stays at TOTAL_WEIGHT throughout.
+    function _addMember(
+        address from,
+        address newMember,
+        uint256 weight,
+        string memory role
+    ) internal {
         require(!_members[newMember].active, "Already member");
-        require(_totalActiveWeight == TOTAL_WEIGHT, "Weight invariant broken");
+        require(_members[from].active, "Donor not active");
+        require(_members[from].weight >= weight, "Donor insufficient weight");
 
-        // Weight redistribution: since total must stay 10000,
-        // this weight is donated by the proposer of the ADD_MEMBER proposal.
-        // The proposal stores (newMember, weight, role) — the "from" is implicit as proposer.
-        // We look it up from the proposal's proposer field.
-        // Since we're inside _executePayload, we don't have direct access to proposer here.
-        // Resolution: store proposer in callData for ADD_MEMBER type.
-        // This is handled correctly because createAddMemberProposal sets msg.sender context.
+        // Deduct from donor
+        _members[from].weight -= weight;
 
-        // For now: take weight from the stored "from" in the redistribution
-        // The actual deduction logic requires the full proposal context.
-        // We implement a simpler approach: the first member with enough weight donates.
-        // Proper implementation embeds "from" in callData (see createAddMemberProposal).
-        // The proposal should encode: (from, newMember, weight, role).
-        // Refactored callData: abi.encode(from, newMember, weight, role)
-        // This is a known limitation of the MVP encoding above — fixable in v2.
-
+        // Add new member
         _members[newMember] = Member({
-            account: newMember,
-            weight: weight,
-            active: true,
+            account:   newMember,
+            weight:    weight,
+            active:    true,
             createdAt: block.timestamp
         });
         _memberList.push(newMember);
 
+        // Total active weight is unchanged (weight moved, not created)
         emit MemberAdded(newMember, weight, role);
         _assertWeightInvariant();
     }

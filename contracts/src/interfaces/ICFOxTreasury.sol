@@ -39,7 +39,11 @@ interface ICFOxTreasury {
         uint256[] calldata amounts
     ) external;
 
+    /// @notice Add/remove an allowed token. Called by governance via proposal.
     function setAllowedToken(address token, bool allowed) external;
+
+    /// @notice One-shot token setup called by factory at deploy time only.
+    function setupAllowedToken(address token) external;
 
     function pause(string calldata reason) external;
 

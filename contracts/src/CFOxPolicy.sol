@@ -82,7 +82,7 @@ contract CFOxPolicy is ICFOxPolicy {
             uint256 day = block.timestamp / 1 days;
             uint256 newDaily = _dailySpend[day] + amount;
             if (newDaily > p.dailyLimit) {
-                revert ExceedsDailyLimit(amount, p.dailyLimit - _dailySpend[day]);
+                return (ExecutionMode.MULTISIG_REQUIRED, p.mediumPaymentThreshold);
             }
 
             // Check weekly limit
