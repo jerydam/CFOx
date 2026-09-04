@@ -58,6 +58,7 @@ export default function DocsPage() {
           </Link>
           <nav className="docs-topnav">
             <Link href="/" className="docs-topnav-link">← Back to app</Link>
+            <a href="https://github.com/cfox" className="docs-topnav-link" target="_blank" rel="noreferrer">GitHub ↗</a>
           </nav>
         </div>
       </header>
