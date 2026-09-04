@@ -58,7 +58,6 @@ export default function DocsPage() {
           </Link>
           <nav className="docs-topnav">
             <Link href="/" className="docs-topnav-link">← Back to app</Link>
-            <a href="https://github.com/faucetdrops/cfox" className="docs-topnav-link" target="_blank" rel="noreferrer">GitHub ↗</a>
           </nav>
         </div>
       </header>
@@ -495,10 +494,15 @@ export default function DocsPage() {
             <Eyebrow>Network</Eyebrow>
             <h2 className="docs-h2">Supported chains</h2>
             <PropTable rows={[
-              ['Celo Mainnet (chain 42220)',   'Primary production chain. Low fees, EVM-compatible, strong stablecoin support (USDC, cUSD).'],
+              ['Celo Testnet ',   'Primary production chain. Low fees, EVM-compatible, strong stablecoin support (USDC, cUSD).'],
               
             ]} />
-            {/*  */}
+            {/* <h3 className="docs-h3">Adding Botchain to MetaMask</h3>
+            <CodeBlock>{`Network name:  BOT Chain
+RPC URL:       https://rpc.botchain.network
+Chain ID:      677
+Currency:      BOT
+Explorer:      https://explorer.botchain.network`}</CodeBlock> */}
             <p className="docs-p">
               WalletConnect is available if a <Code>NEXT_PUBLIC_WC_PROJECT_ID</Code>{' '}
               is set in the frontend <Code>.env</Code>. Without it, only injected
