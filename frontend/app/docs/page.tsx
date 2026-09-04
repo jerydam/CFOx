@@ -109,9 +109,7 @@ export default function DocsPage() {
               equity holders for a vote.
             </p>
             <Callout type="info">
-              CFOx is currently deployed on <strong>Celo Mainnet</strong> and{' '}
-              <strong>Botchain (chain ID 677)</strong>. Testnet support on Celo
-              Alfajores is available for evaluation.
+              CFOx is currently deployed on <strong>Celo Testnet</strong>
             </Callout>
           </section>
 
@@ -498,15 +496,9 @@ export default function DocsPage() {
             <h2 className="docs-h2">Supported chains</h2>
             <PropTable rows={[
               ['Celo Mainnet (chain 42220)',   'Primary production chain. Low fees, EVM-compatible, strong stablecoin support (USDC, cUSD).'],
-              ['Botchain (chain 677)',          'Custom EVM chain used by FaucetDrops. Native token: BOT. Configured via NEXT_PUBLIC_RPC_URL.'],
-              ['Celo Alfajores (chain 44787)', 'Testnet. Use for evaluation and development — tokens have no real value.'],
+              
             ]} />
-            <h3 className="docs-h3">Adding Botchain to MetaMask</h3>
-            <CodeBlock>{`Network name:  BOT Chain
-RPC URL:       https://rpc.botchain.network
-Chain ID:      677
-Currency:      BOT
-Explorer:      https://explorer.botchain.network`}</CodeBlock>
+            {/*  */}
             <p className="docs-p">
               WalletConnect is available if a <Code>NEXT_PUBLIC_WC_PROJECT_ID</Code>{' '}
               is set in the frontend <Code>.env</Code>. Without it, only injected

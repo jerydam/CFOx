@@ -165,7 +165,7 @@ export default function LandingPage() {
             <span className="brand-mark"><span /></span>
             <span className="brand-name">CFOx</span>
           </div>
-          <span className="landing-footer-copy">© 2026 CFOx. Built on Celo &amp; Botchain.</span>
+          <span className="landing-footer-copy">© 2026 CFOx. Built on Celo.</span>
         </div>
       </footer>
     </div>
