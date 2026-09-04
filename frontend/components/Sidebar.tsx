@@ -1,14 +1,16 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import Icon from './Icon'
 import type { IconName } from './Icon'
 import { useAccount, useDisconnect } from '@/lib/wallet'
 import { shortAddr } from '@/lib/api'
+import { useTreasuryIdSafe } from '@/lib/treasury-context'
 
 const navItems: { label: string; icon: IconName; href: string; badge?: boolean }[] = [
-  { label: 'Overview',   icon: 'grid',     href: '/' },
+  { label: 'Overview',   icon: 'grid',     href: '/overview' },
   { label: 'Treasury',   icon: 'wallet',   href: '/treasury' },
   { label: 'Proposals',  icon: 'file',     href: '/proposals', badge: true },
   { label: 'Members',    icon: 'activity', href: '/members' },
@@ -21,23 +23,44 @@ export default function Sidebar({ pendingCount = 0 }: { pendingCount?: number })
   const pathname = usePathname()
   const { address, isConnected } = useAccount()
   const { disconnect } = useDisconnect()
+  const treasuryId = useTreasuryIdSafe()
+  const onOnboard = pathname === '/onboard' || pathname === '/'
 
   return (
     <aside className="sidebar">
-      <div className="brand">
-        <span className="brand-mark"><span /></span>
-        <span>CFOx</span>
-        <small>cfo</small>
+            <div className="brand">
+        <Image
+          src="/logo.png"
+          alt="CFOx"
+          width={100}
+          height={100}
+          style={{ objectFit: 'contain', borderRadius: 6 }}
+          priority
+        />
       </div>
-
       <div className="workspace">
         <div className="workspace-avatar">AC</div>
-        <div><strong>Acme Corp</strong><span>Operations workspace</span></div>
+        <div>
+          <strong>Acme Corp</strong>
+          <span>
+            {treasuryId
+              ? <code style={{ fontSize: 10, fontFamily: 'monospace' }}>{treasuryId.slice(0, 8)}…</code>
+              : <Link href="/onboard" style={{ color: 'var(--accent)', fontSize: 11 }}>Deploy instance ↗</Link>}
+          </span>
+        </div>
         <Icon name="more" size={16} />
       </div>
 
       <nav className="nav-list" aria-label="Main navigation">
         <p className="nav-label">Workspace</p>
+
+        {!treasuryId && !onOnboard && (
+          <Link href="/onboard" className="nav-item" style={{ background: 'var(--accent-light)', color: 'var(--accent)', fontWeight: 600 }}>
+            <Icon name="zap" />
+            <span>Deploy suite</span>
+          </Link>
+        )}
+
         {navItems.map((item) => {
           const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href))
           return (
@@ -48,7 +71,12 @@ export default function Sidebar({ pendingCount = 0 }: { pendingCount?: number })
             </Link>
           )
         })}
+
         <p className="nav-label nav-label-lower">Manage</p>
+        <Link href="/onboard" className={`nav-item ${onOnboard ? 'active' : ''}`}>
+          <Icon name="plus" />
+          <span>New instance</span>
+        </Link>
         <Link href="/settings" className={`nav-item ${pathname === '/settings' ? 'active' : ''}`}>
           <Icon name="settings" />
           <span>Settings</span>
@@ -56,11 +84,11 @@ export default function Sidebar({ pendingCount = 0 }: { pendingCount?: number })
       </nav>
 
       <div className="sidebar-bottom">
-        <div className="help-card">
+        <Link href="/docs" className="help-card" style={{ cursor: "pointer" }}>
           <span className="help-dot">?</span>
           <div><strong>Need a hand?</strong><span>Read the CFO guide</span></div>
           <Icon name="arrow" size={15} />
-        </div>
+        </Link>
 
         {isConnected && address ? (
           <div className="user-row" style={{ cursor: 'pointer' }} onClick={() => disconnect()} title="Disconnect wallet">

@@ -6,7 +6,8 @@ import { useAccount, useConnect, useDisconnect } from '@/lib/wallet'
 import { shortAddr } from '@/lib/api'
 
 const labelMap: Record<string, string> = {
-  '':        'Overview',
+  '':        'Home',
+  overview:  'Overview',
   treasury:  'Treasury',
   proposals: 'Proposals',
   members:   'Members',
@@ -14,6 +15,7 @@ const labelMap: Record<string, string> = {
   policies:  'Policies',
   activity:  'Activity',
   settings:  'Settings',
+  docs:      'Documentation',
 }
 
 export default function Topbar() {

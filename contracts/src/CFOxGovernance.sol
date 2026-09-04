@@ -35,6 +35,12 @@ contract CFOxGovernance is ICFOxGovernance {
 
     address public agentAddress; // AI agent — can create proposals, weight = 0
 
+    // Configurable governance thresholds (basis points)
+    uint256 public mediumThreshold   = 5_000;  // 50% — medium payments
+    uint256 public largeThreshold    = 7_000;  // 70% — large payments / add/remove member
+    uint256 public governanceThreshold = 8_000; // 80% — policy/threshold changes
+    uint256 public criticalThreshold = 9_000;  // 90% — ownership / upgrade
+
     // Members
     mapping(address => Member) private _members;
     address[] private _memberList;
@@ -156,19 +162,23 @@ contract CFOxGovernance is ICFOxGovernance {
 
         // Encode the proposer (from) so _addMember can deduct correctly
         bytes memory callData = abi.encode(msg.sender, newMember, weight, role);
-        // Adding members requires 70% governance threshold
-        proposalId = _createProposal(ProposalType.ADD_MEMBER, 7_000, callData, role);
+        proposalId = _createProposal(ProposalType.ADD_MEMBER, largeThreshold, callData, role);
     }
 
-    /// @notice Propose removing a member (marks inactive, equity goes to first remaining member).
+    /// @notice Propose removing a member. Their equity is redistributed to `beneficiary`.
+    /// @param member      Address to deactivate.
+    /// @param beneficiary Active member (or new address) who receives the returned weight.
     function createRemoveMemberProposal(
-        address member
+        address member,
+        address beneficiary
     ) external override onlyActiveMember returns (uint256 proposalId) {
         require(_members[member].active, "Not active member");
         require(_memberList.length > 1, "Cannot remove only member");
+        require(beneficiary != address(0), "Zero beneficiary");
+        require(beneficiary != member, "Cannot self-benefit");
 
-        bytes memory callData = abi.encode(member);
-        proposalId = _createProposal(ProposalType.REMOVE_MEMBER, 7_000, callData, "Remove member");
+        bytes memory callData = abi.encode(member, beneficiary);
+        proposalId = _createProposal(ProposalType.REMOVE_MEMBER, largeThreshold, callData, "Remove member");
     }
 
     /// @notice Propose transferring equity from one member to another.
@@ -182,7 +192,51 @@ contract CFOxGovernance is ICFOxGovernance {
         // `to` can be a new address (will be added) or existing member
 
         bytes memory callData = abi.encode(from, to, weight);
-        proposalId = _createProposal(ProposalType.TRANSFER_EQUITY, 7_000, callData, "Equity transfer");
+        proposalId = _createProposal(ProposalType.TRANSFER_EQUITY, largeThreshold, callData, "Equity transfer");
+    }
+
+    /// @notice Propose updating the AI spending policy limits.
+    /// @param newPolicy  Encoded SpendingPolicy struct to pass to policy.updatePolicy().
+    function createChangePolicyProposal(
+        bytes calldata newPolicy,
+        string calldata description
+    ) external onlyActiveMember returns (uint256 proposalId) {
+        proposalId = _createProposal(
+            ProposalType.CHANGE_POLICY,
+            governanceThreshold,
+            newPolicy,
+            description
+        );
+    }
+
+    /// @notice Propose changing one of the four governance thresholds.
+    /// @param thresholdType  0=medium 1=large 2=governance 3=critical
+    /// @param newValue       New basis-point value (must be <= 10000)
+    function createChangeThresholdProposal(
+        uint256 thresholdType,
+        uint256 newValue
+    ) external onlyActiveMember returns (uint256 proposalId) {
+        require(newValue > 0 && newValue <= TOTAL_WEIGHT, "Invalid threshold value");
+        bytes memory callData = abi.encode(thresholdType, newValue);
+        proposalId = _createProposal(
+            ProposalType.CHANGE_THRESHOLD,
+            governanceThreshold,
+            callData,
+            "Change governance threshold"
+        );
+    }
+
+    /// @notice Propose an emergency pause of the treasury.
+    function createEmergencyPauseProposal(
+        string calldata reason
+    ) external onlyActiveMember returns (uint256 proposalId) {
+        bytes memory callData = abi.encode(reason);
+        proposalId = _createProposal(
+            ProposalType.EMERGENCY_ACTION,
+            criticalThreshold,
+            callData,
+            "Emergency pause"
+        );
     }
 
     // ─── Signing ──────────────────────────────────────────────────────────────
@@ -296,14 +350,49 @@ contract CFOxGovernance is ICFOxGovernance {
             _addMember(from, newMember, weight, role);
 
         } else if (pType == ProposalType.REMOVE_MEMBER) {
-            (address member) = abi.decode(callData, (address));
-            _removeMember(member);
+            // callData: (member, beneficiary)
+            (address member, address beneficiary) = abi.decode(callData, (address, address));
+            _removeMember(member, beneficiary);
 
         } else if (pType == ProposalType.TRANSFER_EQUITY) {
             (address from, address to, uint256 weight) =
                 abi.decode(callData, (address, address, uint256));
             _transferEquity(from, to, weight);
+
+        } else if (pType == ProposalType.CHANGE_THRESHOLD) {
+            (uint256 thresholdType, uint256 newValue) =
+                abi.decode(callData, (uint256, uint256));
+            _changeThreshold(thresholdType, newValue);
+
+        } else if (pType == ProposalType.CHANGE_POLICY) {
+            // Forward raw calldata bytes to policy contract's updatePolicy()
+            // The bytes encode a SpendingPolicy struct — policy decodes it
+            (bool ok,) = address(policy).call(
+                abi.encodeWithSignature("updatePolicyRaw(bytes)", callData)
+            );
+            require(ok, "Policy update failed");
+            emit PolicyChanged(address(policy));
+
+        } else if (pType == ProposalType.EMERGENCY_ACTION) {
+            (string memory reason) = abi.decode(callData, (string));
+            treasury.pause(reason);
         }
+    }
+
+    function _changeThreshold(uint256 thresholdType, uint256 newValue) internal {
+        require(newValue > 0 && newValue <= TOTAL_WEIGHT, "Invalid threshold");
+        if (thresholdType == THRESHOLD_MEDIUM) {
+            mediumThreshold = newValue;
+        } else if (thresholdType == THRESHOLD_LARGE) {
+            largeThreshold = newValue;
+        } else if (thresholdType == THRESHOLD_GOVERNANCE) {
+            governanceThreshold = newValue;
+        } else if (thresholdType == THRESHOLD_CRITICAL) {
+            criticalThreshold = newValue;
+        } else {
+            revert("Unknown threshold type");
+        }
+        emit ThresholdChanged(thresholdType, newValue);
     }
 
     // ─── Internal Governance Mutations ────────────────────────────────────────
@@ -337,25 +426,32 @@ contract CFOxGovernance is ICFOxGovernance {
         _assertWeightInvariant();
     }
 
-    function _removeMember(address member) internal {
+    function _removeMember(address member, address beneficiary) internal {
         require(_members[member].active, "Not active");
         require(_memberList.length > 1, "Last member");
+        require(beneficiary != address(0), "Zero beneficiary");
+        require(beneficiary != member, "Cannot self-benefit");
 
         uint256 returnedWeight = _members[member].weight;
         _members[member].active = false;
         _members[member].weight = 0;
         _totalActiveWeight -= returnedWeight;
 
-        // Return weight to the first active member (founder pattern)
-        // In production: specify beneficiary in callData
-        for (uint256 i = 0; i < _memberList.length; ) {
-            if (_memberList[i] != member && _members[_memberList[i]].active) {
-                _members[_memberList[i]].weight += returnedWeight;
-                _totalActiveWeight += returnedWeight;
-                break;
-            }
-            unchecked { ++i; }
+        // Return weight to explicitly specified beneficiary
+        if (!_members[beneficiary].active) {
+            // New address becomes a member with the returned weight
+            _members[beneficiary] = Member({
+                account:   beneficiary,
+                weight:    returnedWeight,
+                active:    true,
+                createdAt: block.timestamp
+            });
+            _memberList.push(beneficiary);
+            emit MemberAdded(beneficiary, returnedWeight, "");
+        } else {
+            _members[beneficiary].weight += returnedWeight;
         }
+        _totalActiveWeight += returnedWeight;
 
         emit MemberRemoved(member);
         _assertWeightInvariant();

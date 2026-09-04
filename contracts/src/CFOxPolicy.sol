@@ -114,6 +114,17 @@ contract CFOxPolicy is ICFOxPolicy {
 
     // ─── Admin ────────────────────────────────────────────────────────────────
 
+    /// @notice Called by governance contract's _executePayload for CHANGE_POLICY proposals.
+    ///         Receives raw ABI-encoded SpendingPolicy bytes and decodes them here.
+    function updatePolicyRaw(bytes calldata encoded) external onlyGovernance {
+        SpendingPolicy memory p = abi.decode(encoded, (SpendingPolicy));
+        require(p.mediumPaymentThreshold <= BASIS_POINTS, "Invalid threshold");
+        require(p.largePaymentThreshold <= BASIS_POINTS, "Invalid threshold");
+        require(p.mediumPaymentThreshold <= p.largePaymentThreshold, "Thresholds inverted");
+        _policy = p;
+        emit PolicyUpdated(p);
+    }
+
     function updatePolicy(SpendingPolicy calldata policy) external override onlyGovernance {
         require(policy.mediumPaymentThreshold <= BASIS_POINTS, "Invalid threshold");
         require(policy.largePaymentThreshold <= BASIS_POINTS, "Invalid threshold");

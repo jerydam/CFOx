@@ -1,311 +1,195 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import Link from 'next/link'
-import Shell from '@/components/Shell'
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { useAccount, useConnect } from '@/lib/wallet'
+import { useTreasuryIdSafe } from '@/lib/treasury-context'
 import Icon from '@/components/Icon'
-import {
-  treasury as treasuryApi,
-  money, timeAgo, shortAddr, riskColor,
-  type TreasuryBalance, type Proposal, type Transaction, type SpendingAnalytics,
-} from '@/lib/api'
-import { useTreasuryId } from '@/lib/treasury-context'
 
-export default function OverviewPage() {
-  const treasuryId = useTreasuryId()
+export default function LandingPage() {
+  const router = useRouter()
+  const { address, isConnected } = useAccount()
+  const { connect, connectors, isPending } = useConnect()
+  const treasuryId = useTreasuryIdSafe()
 
-  const [balance, setBalance]       = useState<TreasuryBalance | null>(null)
-  const [proposals, setProposals]   = useState<Proposal[]>([])
-  const [txs, setTxs]               = useState<Transaction[]>([])
-  const [analytics, setAnalytics]   = useState<SpendingAnalytics | null>(null)
-  const [loading, setLoading]       = useState(true)
-  const [error, setError]           = useState<string | null>(null)
-  const [showNotice, setShowNotice] = useState(true)
-
+  // Once wallet is connected, route based on treasury state
   useEffect(() => {
-    ;(async () => {
-      try {
-        const [b, p, t, a] = await Promise.all([
-          treasuryApi.balances(treasuryId),
-          treasuryApi.proposals(treasuryId, 'PENDING'),
-          treasuryApi.transactions(treasuryId, 5),
-          treasuryApi.analytics(treasuryId),
-        ])
-        setBalance(b)
-        setProposals(p)
-        setTxs(t)
-        setAnalytics(a)
-      } catch (e) {
-        setError(String(e))
-      } finally {
-        setLoading(false)
-      }
-    })()
-  }, [treasuryId])
+    if (!isConnected) return
+    if (treasuryId) {
+      router.replace('/overview')
+    } else {
+      router.replace('/onboard')
+    }
+  }, [isConnected, treasuryId, router])
 
-  const pendingCount    = proposals.length
-  const pendingAmount   = proposals.reduce((s, p) => s + Number(p.value ?? 0), 0)
-  const totalUsd        = Number(balance?.total_usd ?? 0)
-  const runwayMonths    = analytics?.runway_months ?? 0
-  const monthlyBurn     = Number(analytics?.monthly_burn_usd ?? 0)
+  function handleConnect() {
+    const injected = connectors.find((c) => c.id === 'injected') ?? connectors[0]
+    if (injected) connect({ connector: injected })
+  }
 
   return (
-    <Shell pendingCount={pendingCount}>
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">Friday, August 22, 2026</p>
-          <h1>Good morning.</h1>
-          <p className="subheading">Here&apos;s what&apos;s happening with your autonomous treasury.</p>
+    <div className="landing">
+      {/* ── Nav ── */}
+      <header className="landing-nav">
+        <div className="landing-nav-inner">
+          <div className="brand-lockup">
+            <span className="brand-mark"><span /></span>
+            <span className="brand-name">CFOx</span>
+            <span className="brand-tag">cfo</span>
+          </div>
+          <div className="landing-nav-actions">
+            <a href="/docs" className="landing-nav-link" target="_blank" rel="noreferrer">Docs</a>
+            <button
+              className="primary-button"
+              style={{ padding: '9px 18px', fontSize: 13 }}
+              onClick={handleConnect}
+              disabled={isPending}
+            >
+              {isPending ? 'Connecting…' : 'Connect Wallet'}
+            </button>
+          </div>
         </div>
-        <Link href="/proposals/new" className="primary-button">
-          <Icon name="plus" size={17} /> New proposal
-        </Link>
-      </div>
+      </header>
 
-      {showNotice && pendingCount > 0 && (
-        <div className="notice">
-          <div className="notice-icon"><Icon name="shield" size={19} /></div>
-          <div>
-            <strong>{pendingCount} {pendingCount === 1 ? 'proposal needs' : 'proposals need'} your attention</strong>
-            <p>{money(pendingAmount)} in pending requests awaiting equity-weighted approval.</p>
+      {/* ── Hero ── */}
+      <section className="landing-hero">
+        <div className="landing-hero-inner">
+          <div className="landing-eyebrow">
+            <span className="landing-pill">Autonomous Treasury · Powered by AI</span>
           </div>
-          <Link href="/proposals" className="notice-action">
-            Review proposals <Icon name="arrow" size={15} />
-          </Link>
-          <button className="notice-close" onClick={() => setShowNotice(false)}>×</button>
+          <h1 className="landing-h1">
+            Your organization's<br />
+            <span className="landing-h1-accent">CFO on-chain.</span>
+          </h1>
+          <p className="landing-lead">
+            CFOx deploys a self-executing treasury with AI spending limits,
+            equity-weighted governance, and a real-time analytics suite — all
+            controlled by your wallet, not a middleman.
+          </p>
+          <div className="landing-cta-group">
+            <button
+              className="primary-button landing-cta-primary"
+              onClick={handleConnect}
+              disabled={isPending}
+            >
+              <Icon name="zap" size={17} />
+              {isPending ? 'Connecting…' : 'Launch app'}
+            </button>
+            <a
+              href="/docs"
+              className="landing-cta-ghost"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Read the docs →
+            </a>
+          </div>
         </div>
-      )}
 
-      {error && <div className="form-error" style={{ marginBottom: 16 }}>Backend error: {error}</div>}
+        {/* Decorative glow */}
+        <div className="landing-glow" aria-hidden />
+      </section>
 
-      {loading ? (
-        <div className="loading-state">Loading your treasury…</div>
-      ) : (
-        <>
-          <div className="metrics">
-            <Metric
-              label="Total treasury"
-              value={money(totalUsd)}
-              change={balance?.is_paused ? '⏸ PAUSED' : 'Live'}
-              positive={!balance?.is_paused}
-              detail={`chain ${balance?.chain_id ?? '—'}`}
-              icon="wallet"
-            />
-            <Metric
-              label="Pending proposals"
-              value={String(pendingCount).padStart(2, '0')}
-              change={money(pendingAmount)}
-              positive={false}
-              detail="awaiting approval"
-              icon="clock"
-            />
-            <Metric
-              label="Monthly burn"
-              value={money(monthlyBurn)}
-              change={`${runwayMonths.toFixed(1)}mo runway`}
-              positive={runwayMonths > 3}
-              detail="avg last 3 months"
-              icon="activity"
-            />
-            <Metric
-              label="Token balances"
-              value={String(balance?.balances.length ?? 0)}
-              change={balance?.balances.map((b) => b.symbol).join(', ') || '—'}
-              positive
-              detail="on-chain"
-              icon="shield"
-            />
+      {/* ── Feature strip ── */}
+      <section className="landing-features">
+        <div className="landing-features-inner">
+          <Feature
+            icon="zap"
+            title="AI-Powered Payments"
+            body="Set per-transaction and daily spend caps. The AI agent auto-executes payments within limits, flags anything above for human approval."
+          />
+          <Feature
+            icon="shield"
+            title="Equity-Weighted Governance"
+            body="Proposals require approval from token holders proportional to their equity stake. No single point of control."
+          />
+          <Feature
+            icon="activity"
+            title="Real-Time Analytics"
+            body="Monthly burn, runway projections, category breakdowns, and a live transaction feed — all indexed from on-chain data."
+          />
+          <Feature
+            icon="wallet"
+            title="Multi-Token Treasury"
+            body="Hold CELO, USDC, cUSD, and more. Balances update in real time with USD valuations from on-chain price feeds."
+          />
+          <Feature
+            icon="file"
+            title="Proposal Workflow"
+            body="Any member can raise a spend proposal. Equity holders vote, the AI executes on consensus — fully on-chain."
+          />
+          <Feature
+            icon="clock"
+            title="One-Click Deploy"
+            body="Governance, Treasury, and Policy contracts deploy in a single transaction. You're live in under 15 seconds."
+          />
+        </div>
+      </section>
+
+      {/* ── How it works ── */}
+      <section className="landing-how">
+        <div className="landing-how-inner">
+          <p className="landing-section-eyebrow">How it works</p>
+          <h2 className="landing-section-h2">From wallet to autonomous treasury in three steps</h2>
+          <div className="landing-steps">
+            <Step n="01" title="Connect your wallet" body="Your wallet is the founder identity. Connect once — no sign-up, no email." />
+            <div className="landing-step-arrow" aria-hidden>→</div>
+            <Step n="02" title="Deploy your contracts" body="Set your org name, spending limits, and hit deploy. Three contracts, one transaction." />
+            <div className="landing-step-arrow" aria-hidden>→</div>
+            <Step n="03" title="Manage from the dashboard" body="Invite members, raise proposals, chat with the AI CFO, and watch your runway in real time." />
           </div>
+        </div>
+      </section>
 
-          <div className="dashboard-grid">
-            {/* Balances card */}
-            <section className="card treasury-card">
-              <div className="card-header">
-                <div>
-                  <p className="card-kicker">On-chain balances</p>
-                  <h2>{money(totalUsd)} <span className="trend">{balance?.is_paused ? '⏸' : '✓'}</span></h2>
-                </div>
-              </div>
-              <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 12 }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                    <th style={{ textAlign: 'left', padding: '6px 0', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Token</th>
-                    <th style={{ textAlign: 'right', padding: '6px 0', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Balance</th>
-                    <th style={{ textAlign: 'right', padding: '6px 0', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>USD Value</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(balance?.balances ?? []).map((b) => (
-                    <tr key={b.symbol} style={{ borderBottom: '1px solid var(--border-light, #f0f0f0)' }}>
-                      <td style={{ padding: '8px 0' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--accent-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>
-                            {b.symbol.slice(0, 2)}
-                          </span>
-                          <span style={{ fontWeight: 600 }}>{b.symbol}</span>
-                        </div>
-                      </td>
-                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                        {Number(b.balance).toLocaleString('en-US', { maximumFractionDigits: 4 })}
-                      </td>
-                      <td style={{ textAlign: 'right', fontWeight: 600 }}>{money(Number(b.balance_usd))}</td>
-                    </tr>
-                  ))}
-                  {(balance?.balances ?? []).length === 0 && (
-                    <tr><td colSpan={3} style={{ padding: '16px 0', color: 'var(--text-muted)', fontSize: 13 }}>No token balances found.</td></tr>
-                  )}
-                </tbody>
-              </table>
-              <div style={{ marginTop: 16, padding: '10px 14px', background: 'var(--accent-light, #f4f9f6)', borderRadius: 8, fontSize: 12, color: 'var(--text-muted)' }}>
-                Treasury address: <code style={{ fontFamily: 'monospace' }}>{balance?.address ? shortAddr(balance.address) : '—'}</code>
-              </div>
-            </section>
+      {/* ── CTA banner ── */}
+      <section className="landing-banner">
+        <div className="landing-banner-inner">
+          <h2 className="landing-banner-h2">Ready to put your treasury on autopilot?</h2>
+          <p className="landing-banner-sub">Connect your wallet and deploy in under a minute.</p>
+          <button
+            className="primary-button landing-cta-primary"
+            style={{ margin: '0 auto' }}
+            onClick={handleConnect}
+            disabled={isPending}
+          >
+            <Icon name="zap" size={17} />
+            {isPending ? 'Connecting…' : 'Get started free'}
+          </button>
+        </div>
+      </section>
 
-            {/* Runway card */}
-            <section className="card distribution-card">
-              <div className="card-header">
-                <div>
-                  <p className="card-kicker">Spending analytics</p>
-                  <h2>{runwayMonths.toFixed(1)} months runway</h2>
-                </div>
-                <Link href="/cfo" className="ghost-button" style={{ fontSize: 12 }}>
-                  Ask CFO →
-                </Link>
-              </div>
-              <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {(analytics?.top_categories ?? []).slice(0, 4).map((c) => (
-                  <div key={c.category}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 3 }}>
-                      <span>{c.category}</span>
-                      <span style={{ fontWeight: 600 }}>{money(c.amount)} <span style={{ color: 'var(--text-muted)' }}>({c.pct.toFixed(0)}%)</span></span>
-                    </div>
-                    <div style={{ height: 4, background: 'var(--border)', borderRadius: 2 }}>
-                      <div style={{ height: '100%', width: `${c.pct}%`, background: 'var(--accent)', borderRadius: 2 }} />
-                    </div>
-                  </div>
-                ))}
-                {(analytics?.top_categories ?? []).length === 0 && (
-                  <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>No spending data yet.</p>
-                )}
-              </div>
-              <Link href="/treasury" className="text-button" style={{ marginTop: 16 }}>
-                View full analytics <Icon name="arrow" size={15} />
-              </Link>
-            </section>
+      {/* ── Footer ── */}
+      <footer className="landing-footer">
+        <div className="landing-footer-inner">
+          <div className="brand-lockup">
+            <span className="brand-mark"><span /></span>
+            <span className="brand-name">CFOx</span>
           </div>
-
-          <div className="lower-grid">
-            {/* Pending proposals mini-table */}
-            <section className="card proposals-card">
-              <div className="card-header">
-                <div>
-                  <p className="card-kicker">Action required</p>
-                  <h2>Pending proposals {pendingCount > 0 && <span className="count-badge">{pendingCount}</span>}</h2>
-                </div>
-                <Link href="/proposals" className="text-button">View all <Icon name="arrow" size={15} /></Link>
-              </div>
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Description</th>
-                      <th>Token</th>
-                      <th>Amount</th>
-                      <th>Approval</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {proposals.length === 0 && (
-                      <tr><td colSpan={4} className="empty-row">No pending proposals.</td></tr>
-                    )}
-                    {proposals.map((p) => {
-                      const pct = p.required_weight ? Math.min(100, Math.round((p.approved_weight / p.required_weight) * 100)) : 0
-                      return (
-                        <tr key={p.id}>
-                          <td>
-                            <div className="merchant">
-                              <span className="merchant-icon generic">{(p.description || 'P').charAt(0).toUpperCase()}</span>
-                              <span>
-                                <strong>{p.description?.slice(0, 32) ?? 'Untitled'}</strong>
-                                <small>{p.type}</small>
-                              </span>
-                            </div>
-                          </td>
-                          <td><span className="chip">{p.token ?? '—'}</span></td>
-                          <td><strong>{p.value ? money(p.value) : '—'}</strong></td>
-                          <td>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <div style={{ flex: 1, height: 4, background: 'var(--border)', borderRadius: 2 }}>
-                                <div style={{ height: '100%', width: `${pct}%`, background: 'var(--accent)', borderRadius: 2 }} />
-                              </div>
-                              <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{pct}%</span>
-                            </div>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            {/* Recent transactions */}
-            <section className="card activity-card">
-              <div className="card-header">
-                <div>
-                  <p className="card-kicker">Live feed</p>
-                  <h2>Recent transactions</h2>
-                </div>
-                <Link href="/activity" className="ghost-button"><Icon name="more" /></Link>
-              </div>
-              <div className="activity-list">
-                {txs.length === 0 && (
-                  <p style={{ fontSize: 13, color: 'var(--text-muted)', padding: '8px 0' }}>No transactions indexed yet.</p>
-                )}
-                {txs.map((t) => (
-                  <div key={t.id} className="activity-item">
-                    <span className={`activity-icon ${t.direction === 'in' ? 'green' : 'orange'}`}>
-                      <Icon name={t.direction === 'in' ? 'plus' : 'arrow'} size={15} />
-                    </span>
-                    <div>
-                      <strong>{t.description || (t.direction === 'in' ? 'Received' : 'Sent')}</strong>
-                      <span>{t.token} · {shortAddr(t.to_address ?? t.from_address ?? '')}</span>
-                    </div>
-                    <time>
-                      {t.amount_usd != null ? money(t.amount_usd) : '—'}
-                      {t.timestamp && <small style={{ display: 'block', color: 'var(--text-muted)', fontSize: 10 }}>{timeAgo(t.timestamp)}</small>}
-                    </time>
-                  </div>
-                ))}
-              </div>
-              <Link href="/activity" className="text-button activity-card-link">
-                See all activity <Icon name="arrow" size={15} />
-              </Link>
-            </section>
-          </div>
-        </>
-      )}
-    </Shell>
+          <span className="landing-footer-copy">© 2026 CFOx. Built on Celo &amp; Botchain.</span>
+        </div>
+      </footer>
+    </div>
   )
 }
 
-function Metric({
-  label, value, change, detail, icon, positive,
-}: {
-  label: string; value: string; change: string; detail: string
-  icon: 'wallet' | 'clock' | 'activity' | 'shield'; positive: boolean
-}) {
+function Feature({ icon, title, body }: { icon: string; title: string; body: string }) {
   return (
-    <div className="metric">
-      <div className="metric-top">
-        <span>{label}</span>
-        <span className="metric-icon"><Icon name={icon} size={17} /></span>
+    <div className="landing-feature-card">
+      <div className="landing-feature-icon">
+        <Icon name={icon as any} size={19} />
       </div>
-      <strong>{value}</strong>
-      <div className="metric-foot">
-        <span className={positive ? 'positive' : ''}>{change}</span>
-        <span>{detail}</span>
-      </div>
+      <strong>{title}</strong>
+      <p>{body}</p>
+    </div>
+  )
+}
+
+function Step({ n, title, body }: { n: string; title: string; body: string }) {
+  return (
+    <div className="landing-step">
+      <span className="landing-step-n">{n}</span>
+      <strong>{title}</strong>
+      <p>{body}</p>
     </div>
   )
 }
