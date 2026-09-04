@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 
 /* ─── Section data ─────────────────────────────────────────────────────────── */
 const sections = [
@@ -52,8 +53,16 @@ export default function DocsPage() {
       <header className="docs-topbar">
         <div className="docs-topbar-inner">
           <Link href="/" className="docs-brand">
-            <span className="brand-mark"><span /></span>
-            <span className="docs-brand-name">CFOx</span>
+            <div className="brand">
+                    <Image
+                      src="/logo.png"
+                      alt="CFOx"
+                      width={100}
+                      height={100}
+                      style={{ objectFit: 'contain', borderRadius: 6 }}
+                      priority
+                    />
+                  </div>
             <span className="docs-brand-sep">/</span>
             <span className="docs-brand-section">Docs</span>
           </Link>

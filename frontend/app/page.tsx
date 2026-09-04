@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useAccount, useConnect } from '@/lib/wallet'
 import { useTreasuryIdSafe } from '@/lib/treasury-context'
 import Icon from '@/components/Icon'
+import Image from 'next/image'
 
 export default function LandingPage() {
   const router = useRouter()
@@ -32,11 +33,16 @@ export default function LandingPage() {
       {/* ── Nav ── */}
       <header className="landing-nav">
         <div className="landing-nav-inner">
-          <div className="brand-lockup">
-            <span className="brand-mark"><span /></span>
-            <span className="brand-name">CFOx</span>
-            <span className="brand-tag">cfo</span>
-          </div>
+          <div className="brand">
+                  <Image
+                    src="/logo.png"
+                    alt="CFOx"
+                    width={100}
+                    height={100}
+                    style={{ objectFit: 'contain', borderRadius: 6 }}
+                    priority
+                  />
+                </div>
           <div className="landing-nav-actions">
             <a href="/docs" className="landing-nav-link" target="_blank" rel="noreferrer">Docs</a>
             <button
