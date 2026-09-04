@@ -1,5 +1,7 @@
 'use client'
 
+export const dynamic = 'force-dynamic'
+
 import { useState, useRef, useEffect } from 'react'
 import Shell from '@/components/Shell'
 import Icon from '@/components/Icon'
