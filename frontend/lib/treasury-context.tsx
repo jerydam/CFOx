@@ -45,10 +45,9 @@ export function TreasuryProvider({ children }: { children: React.ReactNode }) {
   )
 }
 
-/** Returns the active treasury UUID. Throws if none is set. */
+/** Returns the active treasury UUID. Returns '' during SSR/build. */
 export function useTreasuryId(): string {
   const { treasuryId } = useContext(TreasuryContext)
-  if (!treasuryId) throw new Error('No treasury selected. Visit /onboard to deploy one.')
   return treasuryId
 }
 
