@@ -5,12 +5,14 @@ import { useRouter } from 'next/navigation'
 import Shell from '@/components/Shell'
 import Icon from '@/components/Icon'
 import { proposals as proposalsApi, money, type CreateProposalResponse, type ExecutionMode, type RiskLevel } from '@/lib/api'
+import { useTreasuryId } from '@/lib/treasury-context'
 
 const TOKENS = ['USDC', 'USDT', 'CELO']
 const CATEGORIES = ['Infrastructure', 'Software', 'API', 'Payroll', 'Grants', 'Yield', 'Other']
 
 export default function NewProposalPage() {
   const router = useRouter()
+  const treasuryId = useTreasuryId()
   const [form, setForm] = useState({
     token:       'USDC',
     recipient:   '',
@@ -43,6 +45,7 @@ export default function NewProposalPage() {
 
     try {
       const res = await proposalsApi.createPayment({
+        treasury_id: treasuryId,
         token:       form.token,
         recipient:   form.recipient,
         amount,

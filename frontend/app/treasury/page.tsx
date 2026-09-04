@@ -105,8 +105,8 @@ export default function TreasuryPage() {
                     <span className="account-icon" style={{ background: `hsl(${i * 80 + 150}, 55%, 90%)` }}>
                       <span style={{ fontSize: 14, fontWeight: 800 }}>{b.symbol.slice(0, 2)}</span>
                     </span>
-                    <span className={`account-status ${balance.is_paused ? 'paused' : 'active'}`}>
-                      <span />{balance.is_paused ? 'paused' : 'active'}
+                    <span className={`account-status ${balance?.is_paused ? 'paused' : 'active'}`}>
+                      <span />{balance?.is_paused ? 'paused' : 'active'}
                     </span>
                   </div>
                   <strong className="account-name">{b.symbol}</strong>
