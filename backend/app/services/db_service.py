@@ -284,7 +284,77 @@ class TreasuryDB:
             "created_by": founder_address.lower(),
         }).execute()
         return r2.data[0]
+# ── Paste these methods inside the TreasuryDB class in db_service.py ──────────
+# Add after the upsert_policy method at the bottom of the class.
 
+    # ─── Subscriptions ────────────────────────────────────────────────────────
+
+    def get_subscription(self, treasury_id: str) -> dict | None:
+        try:
+            r = (self.db.table("subscriptions")
+                 .select("*")
+                 .eq("treasury_id", treasury_id)
+                 .single()
+                 .execute())
+            return r.data
+        except Exception:
+            return None
+
+    def create_subscription(self, treasury_id: str) -> dict:
+        from datetime import datetime, timezone
+        r = self.db.table("subscriptions").insert({
+            "treasury_id": treasury_id,
+            "free_calls_used": 0,
+            "period_start": datetime.now(timezone.utc).isoformat(),
+            "is_subscribed": False,
+        }).execute()
+        return r.data[0]
+
+    def reset_subscription_period(self, treasury_id: str) -> dict:
+        from datetime import datetime, timezone
+        r = (self.db.table("subscriptions")
+             .update({
+                 "free_calls_used": 0,
+                 "period_start": datetime.now(timezone.utc).isoformat(),
+                 "is_subscribed": False,   # subscription must be renewed each period
+                 "updated_at": datetime.now(timezone.utc).isoformat(),
+             })
+             .eq("treasury_id", treasury_id)
+             .execute())
+        return r.data[0]
+
+    def increment_free_calls(self, treasury_id: str) -> dict:
+        from datetime import datetime, timezone
+        # Read current count then write (Supabase JS SDK doesn't support atomic increment
+        # via the Python client directly — use RPC or a simple read+write here)
+        sub = self.get_subscription(treasury_id)
+        new_count = (sub["free_calls_used"] if sub else 0) + 1
+        r = (self.db.table("subscriptions")
+             .update({
+                 "free_calls_used": new_count,
+                 "updated_at": datetime.now(timezone.utc).isoformat(),
+             })
+             .eq("treasury_id", treasury_id)
+             .execute())
+        return r.data[0]
+
+    def activate_subscription(
+        self, treasury_id: str, tx_hash: str, paid_at
+    ) -> dict:
+        from datetime import datetime, timezone
+        r = (self.db.table("subscriptions")
+             .update({
+                 "is_subscribed": True,
+                 "subscribed_at": paid_at.isoformat() if hasattr(paid_at, "isoformat") else str(paid_at),
+                 "last_payment_tx": tx_hash,
+                 "last_payment_at": paid_at.isoformat() if hasattr(paid_at, "isoformat") else str(paid_at),
+                 "period_start": paid_at.isoformat() if hasattr(paid_at, "isoformat") else str(paid_at),
+                 "free_calls_used": 0,
+                 "updated_at": datetime.now(timezone.utc).isoformat(),
+             })
+             .eq("treasury_id", treasury_id)
+             .execute())
+        return r.data[0]
     def create_treasury(
         self, org_id: str, address: str, chain_id: int, name: str,
         governance_address: str = None, policy_address: str = None,

@@ -16,7 +16,6 @@ sdist/
 wheels/
 *.egg-link
 .installed.cfg
-lib/
 lib64/
 
 # Virtual environments

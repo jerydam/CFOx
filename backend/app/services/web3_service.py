@@ -432,6 +432,51 @@ class TreasuryWeb3:
             })
         return members
 
+
+
+    def verify_subscription_tx(
+        self,
+        tx_hash: str,
+        founder_address: str,
+        treasury_address: str,
+    ) -> bool:
+        """
+        Confirm that tx_hash is a real paySubscription() call from founder_address
+        that emitted SubscriptionPaid with the correct treasury address.
+        Returns True if valid, False otherwise.
+        """
+        try:
+            receipt = self.w3.eth.get_transaction_receipt(tx_hash)
+            tx = self.w3.eth.get_transaction(tx_hash)
+        except Exception:
+            return False
+
+        if receipt is None or receipt.get("status") != 1:
+            return False
+
+        # Sender must be the founder
+        if tx["from"].lower() != founder_address.lower():
+            return False
+
+        # Must be sent to the factory
+        factory_addr = os.getenv("FACTORY_CONTRACT", "").lower()
+        if tx["to"].lower() != factory_addr:
+            return False
+
+        # Check for SubscriptionPaid event
+        # event SubscriptionPaid(address indexed founder, address indexed treasury, uint256 amount, uint256 periodStart)
+        topic = Web3.keccak(text="SubscriptionPaid(address,address,uint256,uint256)")
+        for log in receipt.get("logs", []):
+            topics = log.get("topics", [])
+            if not topics or topics[0] != topic:
+                continue
+            # topics[2] is the indexed treasury address (padded to 32 bytes)
+            if len(topics) >= 3:
+                log_treasury = "0x" + topics[2].hex()[-40:]
+                if log_treasury.lower() == treasury_address.lower():
+                    return True
+
+        return False
     def get_proposal(self, proposal_id: int) -> dict:
         p = self.governance.functions.getProposal(proposal_id).call()
         return {

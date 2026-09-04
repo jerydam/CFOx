@@ -7,9 +7,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-from .api import treasury, proposals, agent, factory
+from .api import treasury, proposals, agent, factory, subscription
 
-load_dotenv() 
+load_dotenv()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from .workers.indexer import start_indexer
@@ -41,10 +43,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(treasury.router,  prefix="/api/treasuries", tags=["treasury"])
-app.include_router(proposals.router, prefix="/api/proposals",  tags=["proposals"])
-app.include_router(agent.router,     prefix="/api/agent",      tags=["agent"])
-app.include_router(factory.router,   prefix="/api/factory",    tags=["factory"])
+app.include_router(treasury.router,      prefix="/api/treasuries",   tags=["treasury"])
+app.include_router(proposals.router,     prefix="/api/proposals",    tags=["proposals"])
+app.include_router(agent.router,         prefix="/api/agent",        tags=["agent"])
+app.include_router(factory.router,       prefix="/api/factory",      tags=["factory"])
+app.include_router(subscription.router,  prefix="/api/subscription", tags=["subscription"])
 
 
 @app.get("/health")

@@ -8,6 +8,8 @@ import "./CFOxPolicy.sol";
 /// @title CFOxFactory
 /// @notice Deploys an isolated (Governance, Treasury, Policy) triple for each founder.
 ///         Each founder gets their own independent CFO instance.
+///         Users pay all their own gas. AI infrastructure is funded via a $5/28-day
+///         subscription paid on-chain to the aiWallet address.
 contract CFOxFactory {
 
     // ─── Types ────────────────────────────────────────────────────────────────
@@ -28,6 +30,16 @@ contract CFOxFactory {
     /// @notice All governance addresses ever deployed (for enumeration)
     address[] public allInstances;
 
+    /// @notice Wallet that receives subscription payments (AI gas fund).
+    ///         Set in constructor from env; never changes.
+    address public immutable aiWallet;
+
+    /// @notice Subscription fee in native token (wei).
+    ///         Owner can update this to match $5 at current token price.
+    uint256 public subscriptionFee;
+
+    address public owner;
+
     // ─── Events ───────────────────────────────────────────────────────────────
 
     event CFOxDeployed(
@@ -37,18 +49,37 @@ contract CFOxFactory {
         address policy
     );
 
+    event SubscriptionPaid(
+        address indexed founder,
+        address indexed treasury,
+        uint256 amount,
+        uint256 periodStart
+    );
+
+    event SubscriptionFeeUpdated(uint256 oldFee, uint256 newFee);
+
+    // ─── Constructor ──────────────────────────────────────────────────────────
+
+    /// @param _aiWallet        Address that receives subscription fees.
+    /// @param _subscriptionFee Initial fee in native wei (owner can update).
+    constructor(address _aiWallet, uint256 _subscriptionFee) {
+        require(_aiWallet != address(0), "CFOxFactory: zero ai wallet");
+        aiWallet = _aiWallet;
+        subscriptionFee = _subscriptionFee;
+        owner = msg.sender;
+    }
+
     // ─── Deploy ───────────────────────────────────────────────────────────────
 
     /// @notice Deploy a full CFOx suite for the caller.
+    ///         Caller pays their own gas — no ETH needs to be sent here.
     /// @param founderName  Display name stored on the governance contract.
-    /// @param agentWallet  AI agent address that can create proposals (0 equity).
     /// @param usdcAddress  Initial ERC20 token to whitelist in the treasury.
     /// @param perTxLimit   Max amount auto-executed without multisig (6-decimal USDC).
     /// @param dailyLimit   Daily autonomous spend cap.
     /// @param weeklyLimit  Weekly autonomous spend cap.
     function deploy(
         string calldata founderName,
-        address agentWallet,
         address usdcAddress,
         uint256 perTxLimit,
         uint256 dailyLimit,
@@ -58,14 +89,13 @@ contract CFOxFactory {
             instances[msg.sender].governance == address(0),
             "CFOxFactory: already deployed"
         );
-        require(agentWallet != address(0), "CFOxFactory: zero agent");
         require(usdcAddress != address(0), "CFOxFactory: zero token");
 
-        // 1. Governance — founder is msg.sender
+        // 1. Governance — founder is msg.sender; aiWallet is the agent
         CFOxGovernance gov = new CFOxGovernance(
             msg.sender,
             founderName,
-            agentWallet
+            aiWallet
         );
 
         // 2. Treasury — factory address passed so setupAllowedToken works
@@ -97,6 +127,39 @@ contract CFOxFactory {
 
         emit CFOxDeployed(msg.sender, address(gov), address(treas), address(pol));
         return (address(gov), address(treas), address(pol));
+    }
+
+    // ─── Subscription ─────────────────────────────────────────────────────────
+
+    /// @notice Pay for a 28-day AI subscription for your treasury.
+    ///         Caller must be the founder of a deployed instance.
+    ///         Sends exactly `subscriptionFee` native tokens to aiWallet.
+    ///         The backend verifies this tx to activate the subscription period.
+    function paySubscription() external payable {
+        CFOxInstance storage inst = instances[msg.sender];
+        require(inst.governance != address(0), "CFOxFactory: no instance");
+        require(msg.value >= subscriptionFee, "CFOxFactory: insufficient fee");
+
+        // Forward fee to AI wallet
+        (bool ok,) = payable(aiWallet).call{value: msg.value}("");
+        require(ok, "CFOxFactory: transfer failed");
+
+        emit SubscriptionPaid(msg.sender, inst.treasury, msg.value, block.timestamp);
+    }
+
+    // ─── Owner admin ──────────────────────────────────────────────────────────
+
+    /// @notice Update the subscription fee (e.g. to track $5 in token terms).
+    function setSubscriptionFee(uint256 newFee) external {
+        require(msg.sender == owner, "CFOxFactory: not owner");
+        emit SubscriptionFeeUpdated(subscriptionFee, newFee);
+        subscriptionFee = newFee;
+    }
+
+    function transferOwnership(address newOwner) external {
+        require(msg.sender == owner, "CFOxFactory: not owner");
+        require(newOwner != address(0), "CFOxFactory: zero address");
+        owner = newOwner;
     }
 
     // ─── Views ────────────────────────────────────────────────────────────────
