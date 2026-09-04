@@ -13,6 +13,7 @@ const sections = [
   { id: 'proposals',   label: 'Proposals' },
   { id: 'policies',    label: 'Policies & limits' },
   { id: 'ai-agent',    label: 'AI CFO agent' },
+  { id: 'subscription',label: 'Gas & AI subscription' },
   { id: 'members',     label: 'Members & equity' },
   { id: 'activity',    label: 'Activity & analytics' },
   { id: 'onboard',     label: 'Onboarding flow' },
@@ -167,23 +168,39 @@ export default function DocsPage() {
               CFOx has two main layers: a <strong>smart-contract layer</strong>{' '}
               (on-chain) and an <strong>off-chain layer</strong> (the API, indexer,
               and AI agent). They communicate only through on-chain state — the
-              off-chain layer reads the chain and submits signed transactions; it
-              never holds funds.
+              off-chain layer reads the chain and submits transactions only for the
+              AI agent's own auto-approved actions; it never holds member funds and
+              never signs on a founder's or member's behalf.
             </p>
+            <Callout type="info">
+              CFOx is <strong>factory-deployed per founder</strong>. Calling{' '}
+              <Code>Factory.deploy()</Code> spins up a brand-new, isolated
+              (Governance, Treasury, Policy) triple owned entirely by the caller —
+              nobody else's funds or votes ever touch your instance. One wallet can
+              deploy exactly one instance.
+            </Callout>
             <ArchDiagram />
             <h3 className="docs-h3">Smart-contract layer</h3>
             <PropTable rows={[
-              ['Governance', 'Tracks member registry and equity weights. Validates quorum on proposal votes.'],
-              ['Treasury',   'Holds all funds. Executes outbound transfers only when called by Governance after quorum, or by Policy for auto-approved amounts.'],
-              ['Policy',     'Enforces per-tx, daily, and weekly spend limits for the AI agent. Blocks execution if any cap would be breached.'],
-              ['Factory',    'One-click deployer. Deploys and wires the three contracts above in a single transaction.'],
+              ['Governance', 'Tracks member registry and equity weights (fixed 10,000 basis points = 100%). Validates approval-weight thresholds on proposal votes and snapshots signer weight at proposal creation.'],
+              ['Treasury',   'Holds all funds for this instance only. Executes outbound transfers only when called by Governance after threshold is met, or automatically for Policy-approved amounts.'],
+              ['Policy',     'Enforces per-tx, daily, and weekly spend limits for the AI agent. Escalates to a governance proposal if any cap would be breached — it never silently reverts a legitimate request.'],
+              ['Factory',    'One-click deployer. Deploys and wires a fresh Governance + Treasury + Policy triple for the caller in a single transaction, and collects the $5/28-day AI subscription fee.'],
+            ]} />
+            <h3 className="docs-h3">Who pays gas for what</h3>
+            <PropTable rows={[
+              ['Deploying your instance', 'Paid by the founder\u2019s wallet — the founder signs and pays gas for Factory.deploy().'],
+              ['Voting / approving a proposal', 'Paid by whichever member\u2019s wallet calls Governance.approve() — every write on the dashboard is signed and paid for by the connected wallet, never by the backend.'],
+              ['Executing a passed proposal', 'Paid by whichever wallet (member or the AI agent) calls Governance.execute().'],
+              ['AI auto-executed payments', 'Paid by the AI agent\u2019s own wallet, whose gas balance is funded from subscription fees routed to it by the Factory.'],
+              ['Paying your AI subscription', 'Paid by the founder\u2019s wallet — a single Factory.paySubscription() call.'],
             ]} />
             <h3 className="docs-h3">Off-chain layer</h3>
             <PropTable rows={[
-              ['FastAPI backend',  'REST API consumed by the Next.js frontend. Reads on-chain state via Web3.py, submits transactions from the agent wallet.'],
+              ['FastAPI backend',  'REST API consumed by the Next.js frontend. Reads on-chain state via Web3.py and, for the AI agent only, submits Policy-gated transactions from the agent wallet (its private key lives only in the backend\u2019s server environment).'],
               ['Indexer worker',   'Background process that polls the chain for new blocks and indexes transactions into Supabase.'],
-              ['AI CFO agent',     'LLM agent with tools for reading balances, submitting payments, querying analytics, and explaining treasury state in plain English.'],
-              ['Supabase / asyncpg', 'Relational database for indexed transaction history, proposal metadata, and member records.'],
+              ['AI CFO agent',     'LLM agent with tools for reading balances, submitting payments, querying analytics, and explaining treasury state in plain English. Gated by the subscription quota below.'],
+              ['Supabase / asyncpg', 'Relational database for indexed transaction history, proposal metadata, member records, and subscription/usage state.'],
             ]} />
           </section>
 
@@ -194,11 +211,12 @@ export default function DocsPage() {
             <Eyebrow>Core contract</Eyebrow>
             <h2 className="docs-h2">Treasury</h2>
             <p className="docs-p">
-              The Treasury contract is the actual custodian of your organization's
-              funds. It accepts any ERC-20 token or native CELO and maintains
-              on-chain balances. All outbound transfers are gated — nothing leaves
-              without either a passing governance vote or a valid Policy-compliant
-              AI agent call.
+              Every founder gets their <strong>own Treasury contract</strong>,
+              deployed fresh by the Factory — it is never shared with any other
+              organization. It accepts any ERC-20 token or native CELO and
+              maintains on-chain balances. All outbound transfers are gated —
+              nothing leaves without either a passing governance vote or a valid
+              Policy-compliant AI agent call.
             </p>
             <h3 className="docs-h3">Balances</h3>
             <p className="docs-p">
@@ -209,12 +227,21 @@ export default function DocsPage() {
             </p>
             <h3 className="docs-h3">Pause mechanism</h3>
             <p className="docs-p">
-              The founder can pause the Treasury at any time. While paused, no
-              outbound transfers execute — including AI-agent auto-payments. The
-              dashboard surfaces a <Code>⏸ PAUSED</Code> badge on every affected
-              panel. Unpausing requires a governance proposal above the quorum
-              threshold.
+              Pausing is a governance action, not a founder-unilateral one — it
+              runs through the same <Code>EMERGENCY_ACTION</Code> proposal type as
+              everything else critical, requiring the critical threshold (90% by
+              default) to execute. While paused, no outbound transfers execute —
+              including AI-agent auto-payments. The dashboard surfaces a{' '}
+              <Code>⏸ PAUSED</Code> badge on every affected panel.
             </p>
+            <Callout type="warning">
+              The Treasury contract exposes an <Code>unpause()</Code> function, but
+              there is currently no governance proposal type wired up to call it —
+              only <Code>pause()</Code> is reachable through the proposal flow.
+              Unpausing today requires a direct contract call by whoever the
+              Governance contract authorizes; treat this as a known gap until a{' '}
+              <Code>createUnpauseProposal</Code> path ships.
+            </Callout>
             <Callout type="warning">
               Pausing does <strong>not</strong> prevent inbound transfers. Funds can
               still be received while the treasury is paused.
@@ -235,32 +262,42 @@ export default function DocsPage() {
             <Eyebrow>Voting system</Eyebrow>
             <h2 className="docs-h2">Governance</h2>
             <p className="docs-p">
-              CFOx uses <strong>equity-weighted voting</strong>. Each member holds
-              a weight (expressed as an integer — think of it as basis points of
-              total equity). A proposal passes when the sum of approving weights
-              meets or exceeds the configured quorum threshold.
+              CFOx uses <strong>equity-weighted voting</strong> in fixed-point basis
+              points: total equity always equals exactly <Code>10000</Code> (100%)
+              on every instance — new members are allocated weight{' '}
+              <em>out of</em> an existing member's balance, they never dilute the
+              total. A proposal passes when the sum of approving weights meets or
+              exceeds the threshold assigned to that proposal type.
             </p>
-            <h3 className="docs-h3">Quorum</h3>
+            <h3 className="docs-h3">Approval thresholds</h3>
             <p className="docs-p">
-              The default quorum is <Code>51%</Code> of total equity weight. This
-              can be changed via a governance proposal. There is no time-lock by
-              default, but one can be added via a Policy rule.
+              Rather than one global quorum, each proposal type carries its own
+              configurable threshold (all founder-adjustable via a{' '}
+              <Code>CHANGE_THRESHOLD</Code> proposal):
             </p>
+            <PropTable rows={[
+              ['Medium payment (50%)',    'Payments the AI escalates because they exceed the per-tx/daily/weekly auto-limit but are below the "large" cutoff.'],
+              ['Large payment (70%)',     'Payments at or above the large-payment cutoff. Also the threshold for adding/removing a member or transferring equity.'],
+              ['Governance (80%)',        'Changing the AI Policy limits or changing any of these threshold values.'],
+              ['Critical (90%)',          'Emergency pause of the treasury.'],
+            ]} />
             <h3 className="docs-h3">Vote lifecycle</h3>
             <StepList compact>
-              <Step n={1} title="Proposal created">Any member can submit a proposal.</Step>
-              <Step n={2} title="Voting open">All members with equity weight can vote APPROVE or REJECT.</Step>
-              <Step n={3} title="Quorum reached">If approvals ≥ quorum, the proposal moves to EXECUTABLE.</Step>
-              <Step n={4} title="Execution">Any member (or the AI agent) triggers execution. The action runs on-chain.</Step>
-              <Step n={5} title="Settled">The proposal is marked COMPLETED or REJECTED and immutably recorded.</Step>
+              <Step n={1} title="Proposal created">A member (or the AI agent, for payments) calls the matching create*Proposal function. If it's a small AI payment fully within Policy limits, it auto-executes here with no vote at all.</Step>
+              <Step n={2} title="Weights snapshotted">Every active member's current weight is locked in for this proposal at creation time — later equity changes can't retroactively swing the outcome.</Step>
+              <Step n={3} title="Approving">Active members call <Code>approve()</Code>. Each signer's snapshot weight is added to the running total. One signature per address per proposal.</Step>
+              <Step n={4} title="Threshold reached">Once approved weight ≥ the proposal's required weight, anyone can call <Code>execute()</Code>.</Step>
+              <Step n={5} title="Settled">The action runs on-chain and the proposal is marked executed. It can also be cancelled by the proposer before execution, or it expires after 7 days.</Step>
             </StepList>
             <h3 className="docs-h3">Equity weight</h3>
             <p className="docs-p">
-              Weights are whole numbers stored on the Governance contract. The
-              founder starts at <Code>10000</Code> (representing 100%). When a new
-              member is added with weight <Code>2000</Code>, the total supply
-              increases to <Code>12000</Code> and quorum recalculates accordingly.
-              Weights can be adjusted or revoked via proposals.
+              Weights are basis-point integers stored on the Governance contract.
+              The founder starts at <Code>10000</Code> (100%). Adding a member with
+              weight <Code>2000</Code> deducts that amount from an existing
+              member's balance (usually the founder's) — the total stays{' '}
+              <Code>10000</Code>; there is no dilution. The AI agent's own address
+              always holds weight <Code>0</Code>: it can create proposals but can
+              never sign or vote on one.
             </p>
           </section>
 
@@ -275,12 +312,14 @@ export default function DocsPage() {
               governance consent. There are several proposal types:
             </p>
             <PropTable rows={[
-              ['PAYMENT',        'Transfer tokens from the treasury to a recipient address.'],
-              ['MEMBER_ADD',     'Register a new address as a member with a specified equity weight.'],
-              ['MEMBER_REMOVE',  'Revoke a member\'s equity weight and remove them from the registry.'],
-              ['POLICY_UPDATE',  'Change one or more spending limits on the Policy contract.'],
-              ['PAUSE',          'Pause or unpause the treasury.'],
-              ['CUSTOM',         'Arbitrary calldata — used for advanced contract interactions.'],
+              ['PAYMENT',           'Transfer tokens from the treasury to a recipient address. Created automatically when the AI (or a member) requests a payment above the auto-execute limit.'],
+              ['BATCH_PAYMENT',     'Multiple transfers bundled into a single proposal and vote.'],
+              ['ADD_MEMBER',        'Register a new address as a member, allocating it equity weight deducted from the proposer\u2019s balance.'],
+              ['REMOVE_MEMBER',     'Deactivate a member and return their weight to a chosen beneficiary.'],
+              ['TRANSFER_EQUITY',   'Move weight directly from one member to another (or to a new address).'],
+              ['CHANGE_POLICY',     'Update the AI agent\u2019s per-tx/daily/weekly spending limits on the Policy contract.'],
+              ['CHANGE_THRESHOLD',  'Update one of the four approval-weight thresholds (medium/large/governance/critical).'],
+              ['EMERGENCY_ACTION',  'Pause the treasury immediately.'],
             ]} />
             <h3 className="docs-h3">Creating a proposal</h3>
             <p className="docs-p">
@@ -288,17 +327,24 @@ export default function DocsPage() {
               type, recipient (for payments), token, amount, and a plain-English
               description. The description is stored off-chain in Supabase and
               surfaced in the dashboard and AI agent context — it is not on-chain.
+              Submitting calls the matching <Code>create*Proposal()</Code> function
+              on Governance and is signed by, and costs gas for, your own wallet.
             </p>
             <h3 className="docs-h3">Voting</h3>
             <p className="docs-p">
               On the Proposals list page, open any pending proposal and click{' '}
-              <strong>Approve</strong> or <strong>Reject</strong>. Your wallet
-              signs a transaction that calls <Code>castVote()</Code> on the
-              Governance contract. The approval progress bar updates in real time.
+              <strong>Approve</strong>. Your wallet signs and pays gas for a
+              transaction that calls <Code>approve()</Code> on the Governance
+              contract, contributing your snapshotted equity weight. The approval
+              progress bar updates in real time. Once the required weight is met,
+              anyone can click <strong>Execute</strong> to call{' '}
+              <Code>execute()</Code> and run the action on-chain.
             </p>
             <Callout type="info">
-              You can only vote once per proposal per address. Changing your vote is
-              not supported — choose carefully.
+              You can only approve once per proposal per address — there is no
+              on-chain "reject" vote, only choosing not to approve. A proposal
+              that never reaches its threshold simply expires after 7 days, or can
+              be cancelled by its proposer.
             </Callout>
           </section>
 
@@ -315,27 +361,39 @@ export default function DocsPage() {
             </p>
             <PropTable rows={[
               ['Per-transaction limit', 'Maximum USDC value of a single AI-initiated payment. Payments above this always go to a governance vote, regardless of daily/weekly headroom.'],
-              ['Daily cap',   'Total USDC the AI agent can spend in a rolling 24-hour window. Resets at UTC midnight.'],
-              ['Weekly cap',  'Total USDC the AI agent can spend in a rolling 7-day window. Resets Monday 00:00 UTC.'],
+              ['Daily cap',   'Total USDC the AI agent can spend in a given UTC calendar day. Resets at UTC midnight.'],
+              ['Weekly cap',  'Total USDC the AI agent can spend in a given 7-day epoch window (not calendar-aligned to a particular weekday).'],
             ]} />
             <p className="docs-p">
-              If any limit would be breached, the transaction reverts on-chain. The
-              AI agent catches this revert and automatically escalates the payment
-              to a governance proposal, notifying you in the CFO Chat.
+              If any limit would be breached, the AI's payment request doesn't
+              revert or fail — <Code>checkAndRecordSpend()</Code> tells Governance
+              to open a proposal at the matching threshold in the same
+              transaction, and the CFO Chat surfaces that a vote is now needed.
             </p>
             <h3 className="docs-h3">Changing limits</h3>
             <p className="docs-p">
-              Submit a <Code>POLICY_UPDATE</Code> proposal with the new values.
-              Once it passes quorum, the Policy contract updates atomically. There
-              is no delay.
+              Submit a <Code>CHANGE_POLICY</Code> proposal with the new
+              per-tx/daily/weekly values (encoded as a full{' '}
+              <Code>SpendingPolicy</Code> struct). Once approved weight reaches
+              the governance threshold (80% by default), the Policy contract
+              updates atomically. There is no delay.
             </p>
             <h3 className="docs-h3">Policy rules (advanced)</h3>
             <p className="docs-p">
-              Beyond the three numeric limits, the Policy contract supports
-              allowlist rules (only pay to pre-approved addresses) and token rules
-              (only spend specific tokens autonomously). These are configured via
-              raw calldata in a <Code>CUSTOM</Code> proposal.
+              Beyond the three numeric limits, the Policy contract can restrict
+              auto-payments to a recipient allowlist (
+              <Code>recipientWhitelistEnabled</Code> in the policy struct, backed
+              by <Code>setRecipientWhitelisted()</Code>), and the Treasury
+              maintains its own per-token allowlist (<Code>setAllowedToken()</Code>
+              ) so only approved assets can move at all.
             </p>
+            <Callout type="warning">
+              Both of those setters are <Code>onlyGovernance</Code>, but no current
+              proposal type calls them directly — <Code>CHANGE_POLICY</Code> can
+              flip the whitelist on/off as a whole, but populating the allowlist
+              itself currently has no proposal path wired up. Treat per-recipient
+              and per-token allowlisting as not yet reachable through the UI.
+            </Callout>
           </section>
 
           <Divider />
@@ -375,10 +433,68 @@ export default function DocsPage() {
               submit.
             </p>
             <Callout type="warning">
-              The agent uses your backend's signer wallet, not your personal
-              wallet, to submit transactions. The signer wallet must be funded with
-              native gas tokens (CELO or BOT). It only has authority within Policy
-              limits — it cannot drain the treasury.
+              The agent uses its own signer wallet — configured once, address-only,
+              in the backend's environment — never your personal wallet, and never
+              a private key stored in the frontend. That wallet's gas is topped up
+              from AI-subscription fees (see next section). The agent only has
+              authority within Policy limits — it cannot drain the treasury, and
+              anything above those limits is escalated to a governance proposal
+              that you and your co-signers pay to approve and execute yourselves.
+            </Callout>
+          </section>
+
+          <Divider />
+
+          {/* ─── Gas & subscription ──────────────────────────────────── */}
+          <section id="subscription" className="docs-section">
+            <Eyebrow>Cost model</Eyebrow>
+            <h2 className="docs-h2">Gas &amp; AI subscription</h2>
+            <p className="docs-p">
+              CFOx separates two very different costs: the gas you pay for your own
+              on-chain actions, and the subscription that keeps the AI agent's
+              infrastructure (LLM calls + its own on-chain gas) running.
+            </p>
+            <h3 className="docs-h3">You always pay your own gas</h3>
+            <p className="docs-p">
+              Deploying your instance, voting on a proposal, and executing a passed
+              proposal are all transactions signed by your connected wallet. CFOx's
+              backend never holds a key that can spend on your behalf for these —
+              the only private key it holds is the AI agent's own, and that key can
+              only ever call Policy-gated auto-payments, nothing else.
+            </p>
+            <h3 className="docs-h3">Free tier: 5 AI calls / 28 days</h3>
+            <p className="docs-p">
+              Every treasury gets <Code>5</Code> free CFO Chat calls per rolling{' '}
+              <Code>28-day</Code> period, tracked server-side. The period resets
+              automatically 28 days after it started — there's nothing to renew
+              manually on the free tier.
+            </p>
+            <h3 className="docs-h3">Paid tier: $5 / 28 days</h3>
+            <p className="docs-p">
+              Once the 5 free calls are used, continuing to use CFO Chat requires
+              an active subscription. The founder calls{' '}
+              <Code>Factory.paySubscription()</Code> from their own wallet, sending
+              the current <Code>subscriptionFee</Code> (denominated in native
+              token, set by the factory owner to track ~$5). That single
+              transaction:
+            </p>
+            <StepList compact>
+              <Step n={1} title="Forwards the fee">The full payment is forwarded on-chain to the AI wallet — it funds the agent's own gas balance and, off-chain, the LLM API costs.</Step>
+              <Step n={2} title="Emits SubscriptionPaid">The factory emits an event with your treasury address, amount, and timestamp.</Step>
+              <Step n={3} title="Backend verifies & activates">The frontend posts the tx hash to <Code>/api/subscription/{'{treasuryId}'}/activate</Code>, which independently verifies the on-chain event before activating a fresh 28-day period.</Step>
+            </StepList>
+            <p className="docs-p">
+              You can check your current quota any time via{' '}
+              <Code>GET /api/subscription/{'{treasuryId}'}/status</Code>, which the
+              CFO Chat page polls to show your remaining free calls or subscription
+              renewal date and to gate the chat input once the free tier is
+              exhausted and no subscription is active.
+            </p>
+            <Callout type="info">
+              The subscription funds AI infrastructure only. It has no effect on
+              governance, spending limits, or the treasury's on-chain funds — you
+              can run CFOx entirely without ever subscribing by using the dashboard
+              and submitting/approving proposals directly.
             </Callout>
           </section>
 
@@ -398,21 +514,27 @@ export default function DocsPage() {
             <p className="docs-p">
               Go to <strong>Members → Add member</strong> (or ask the AI CFO to
               draft the proposal). Specify the member's wallet address and their
-              equity weight. The weight is relative — the system normalizes it
-              against total supply automatically.
+              equity weight in basis points. That weight is <strong>deducted
+              from your own balance</strong> — total equity always stays exactly{' '}
+              <Code>10000</Code>. You can't allocate more than you currently hold.
             </p>
             <h3 className="docs-h3">Removing a member</h3>
             <p className="docs-p">
-              Submit a <Code>MEMBER_REMOVE</Code> proposal with the target address.
-              If it passes, the member's weight is set to zero and they can no
-              longer vote. Their past votes are immutably recorded on-chain.
+              Submit a <Code>REMOVE_MEMBER</Code> proposal with the target address
+              and a beneficiary. If it passes the large-payment threshold (70% by
+              default), the member is deactivated and their entire weight is
+              transferred to the beneficiary (an existing member, or a brand-new
+              address that becomes a member with that weight). They can no longer
+              sign proposals, though their past approvals remain on-chain.
             </p>
-            <h3 className="docs-h3">Equity dilution</h3>
+            <h3 className="docs-h3">Equity is transferred, never diluted</h3>
             <p className="docs-p">
-              When a new member is added, the total equity weight increases by
-              their allocation. Existing members' percentages are diluted
-              proportionally. This is the same behaviour as issuing new shares — be
-              deliberate with the numbers you choose.
+              Unlike issuing new shares, adding or removing a member on CFOx never
+              changes the total supply — it only ever moves weight between
+              addresses. Total equity is a contract invariant enforced on every
+              write; it's checked and would revert if it ever slipped away from{' '}
+              <Code>10000</Code>. Be deliberate with the amounts you allocate, the
+              same way you would with any zero-sum transfer.
             </p>
           </section>
 
@@ -477,8 +599,10 @@ export default function DocsPage() {
             </p>
             <CodeBlock>NEXT_PUBLIC_TREASURY_ID=your-treasury-uuid-here</CodeBlock>
             <p className="docs-p">
-              The env var takes precedence over <Code>localStorage</Code> when both
-              are present.
+              This env var is only the initial default. Once a treasury ID is
+              saved to <Code>localStorage</Code> (after a deploy, or by restoring
+              an existing instance), the browser's saved value takes precedence
+              over the env var on that device.
             </p>
             <h3 className="docs-h3">Routing logic</h3>
             <PropTable rows={[
@@ -523,18 +647,20 @@ Explorer:      https://explorer.botchain.network`}</CodeBlock> */}
               each actor can and cannot do:
             </p>
             <PropTable rows={[
-              ['Your wallet (founder)',     'Can submit any proposal, vote, and trigger execution. Has no special bypass — still needs quorum.'],
-              ['Members',                   'Can submit proposals and vote. Voting power is proportional to equity weight.'],
-              ['AI agent signer wallet',    'Can call the Treasury only within Policy limits. Cannot vote. Cannot change Policy limits. Cannot pause/unpause.'],
-              ['Backend API server',        'Read-only access to chain state plus submitting AI agent transactions. Cannot override governance.'],
-              ['Supabase database',         'Stores off-chain metadata (descriptions, categories). No on-chain authority — corrupting it does not change contract state.'],
+              ['Your wallet (founder)',     'Can submit any proposal, approve it, and trigger execution — always by paying your own gas. No special bypass; still needs the proposal\u2019s required approval weight like anyone else.'],
+              ['Members',                   'Can submit proposals and approve them. Approval weight is their snapshotted equity weight, not a simple headcount vote.'],
+              ['AI agent signer wallet',    'Can call the Treasury only within Policy limits, using its own gas (funded by subscription fees). Holds 0 equity weight — cannot approve/vote, cannot change Policy limits, cannot pause the treasury.'],
+              ['Backend API server',        'Read-only access to chain state, plus submitting the AI agent\u2019s own Policy-gated transactions. Cannot override governance or spend on a member\u2019s behalf.'],
+              ['Supabase database',         'Stores off-chain metadata (descriptions, categories, subscription/usage counters). No on-chain authority — corrupting it does not change contract state.'],
             ]} />
             <h3 className="docs-h3">Key risks to be aware of</h3>
             <ul className="docs-ul">
-              <li>The backend's <strong>signer private key</strong> controls the AI agent's spending authority. Keep it in a secrets manager, not a plain <Code>.env</Code> file in production.</li>
-              <li>Smart contracts on Celo Alfajores (testnet) are <strong>not audited</strong> and should never hold real funds.</li>
+              <li>The backend's <strong>agent private key</strong> controls both the AI's spending authority and the wallet that receives subscription fees. Keep it in a secrets manager, not a plain <Code>.env</Code> file in production.</li>
+              <li>Smart contracts on Celo Testnet are <strong>not audited</strong> and should never hold real funds.</li>
               <li>The Policy limits are your first line of defence against a compromised agent. Set them conservatively.</li>
-              <li>There is currently no time-lock on governance proposals. A proposal can be executed immediately after quorum. For high-value treasuries, consider adding a delay policy.</li>
+              <li>There is currently no time-lock on governance proposals. A proposal can be executed immediately once its threshold is met. For high-value treasuries, consider adding a delay policy.</li>
+              <li><strong>Unpausing has no wired proposal path yet</strong> — <Code>Treasury.unpause()</Code> exists and is governance-gated, but no <Code>create*Proposal</Code> function currently targets it (see the Treasury section above). Don't rely on pausing as a reversible safety switch until that's shipped.</li>
+              <li>Similarly, per-recipient and per-token allowlisting exist on-chain but aren't reachable through any current proposal type — only the whitelist's on/off flag is, via <Code>CHANGE_POLICY</Code>.</li>
             </ul>
           </section>
 
@@ -573,9 +699,13 @@ Explorer:      https://explorer.botchain.network`}</CodeBlock> */}
             </FAQ>
 
             <FAQ q="Is there a fee to use CFOx?">
-              CFOx itself charges no protocol fee. You pay only on-chain gas costs
-              (very low on Celo, typically under $0.01 per transaction) and any
-              infrastructure costs for self-hosting the backend.
+              CFOx itself charges no protocol fee on governance or treasury
+              actions — you only pay on-chain gas for those (very low on Celo,
+              typically under $0.01 per transaction). The one paid feature is the
+              AI CFO Chat: you get 5 free calls every 28 days, after which
+              continuing to chat costs $5 per 28-day period, paid on-chain via{' '}
+              <Code>Factory.paySubscription()</Code>. See{' '}
+              <Code>Gas &amp; AI subscription</Code> above.
             </FAQ>
 
             <FAQ q="Can the AI agent drain my treasury?">

@@ -18,7 +18,13 @@ const labelMap: Record<string, string> = {
   docs:      'Documentation',
 }
 
-export default function Topbar() {
+export default function Topbar({
+  onMenuClick,
+  navOpen = false,
+}: {
+  onMenuClick?: () => void
+  navOpen?: boolean
+} = {}) {
   const pathname = usePathname()
   const key = pathname === '/' ? '' : pathname.split('/')[1] || ''
   const label = labelMap[key] || 'Overview'
@@ -39,6 +45,17 @@ export default function Topbar() {
 
   return (
     <header className="topbar">
+      <button
+        className="menu-button"
+        aria-label={navOpen ? 'Close menu' : 'Open menu'}
+        aria-expanded={navOpen}
+        onClick={onMenuClick}
+      >
+        <span />
+        <span />
+        <span />
+      </button>
+
       <div className="mobile-brand">
         <span className="brand-mark"><span /></span>CFOx
       </div>

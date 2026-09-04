@@ -3,10 +3,12 @@
 export const dynamic = 'force-dynamic'
 
 import { useState, useRef, useEffect } from 'react'
+import { useAccount, useReadContract } from 'wagmi'
 import Shell from '@/components/Shell'
 import Icon from '@/components/Icon'
-import { agent, money, type AgentChatMessage } from '@/lib/api'
+import { agent, type AgentChatMessage } from '@/lib/api'
 import { useTreasuryId } from '@/lib/treasury-context'
+import { useSubscription } from '@/lib/useSubscription'
 
 type UiMessage = AgentChatMessage & {
   id: string
@@ -22,8 +24,31 @@ const SUGGESTED = [
   'Propose paying 500 USDC to 0x1234… for infrastructure.',
 ]
 
+// Read subscriptionFee from factory so the UI always shows the current price
+const FACTORY_ABI = [
+  {
+    name: 'subscriptionFee',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const
+
 export default function CFOChatPage() {
   const treasuryId = useTreasuryId()
+  const { address: founderAddress } = useAccount()
+
+  const { status, paying, error: subError, subscribe, FREE_CALLS_LIMIT, refetch: refetchSub } =
+    useSubscription(treasuryId, founderAddress)
+
+  // Read the current fee from the factory contract
+  const factoryAddr = process.env.NEXT_PUBLIC_FACTORY_CONTRACT as `0x${string}` | undefined
+  const { data: subscriptionFeeWei } = useReadContract({
+    address: factoryAddr,
+    abi: FACTORY_ABI,
+    functionName: 'subscriptionFee',
+  })
 
   const [messages, setMessages]   = useState<UiMessage[]>([])
   const [input, setInput]         = useState('')
@@ -43,6 +68,8 @@ export default function CFOChatPage() {
 
   async function send(text = input.trim()) {
     if (!text || busy) return
+    if (!status?.ai_allowed) return   // gate enforced in UI too
+
     setInput('')
     setError(null)
     setBusy(true)
@@ -61,12 +88,23 @@ export default function CFOChatPage() {
           prev.map((m) => m.id === assistantId ? { ...m, content: full } : m)
         )
       }
-      // Mark done
       setMessages((prev) =>
         prev.map((m) => m.id === assistantId ? { ...m, streaming: false } : m)
       )
+      // Refresh quota after each call
+      refetchSub()
     } catch (e) {
-      // Fallback to non-streaming if SSE fails
+      // Detect 402 (quota exhausted) returned via SSE fallback
+      const msg = String(e)
+      if (msg.includes('402') || msg.includes('free_tier_exhausted')) {
+        setError('You have used all your free AI calls. Subscribe below to continue.')
+        setMessages((prev) => prev.filter((m) => m.id !== assistantId))
+        refetchSub()
+        setBusy(false)
+        return
+      }
+
+      // Fallback to non-streaming
       try {
         const res = await agent.chat(treasuryId, text, historyForApi())
         setMessages((prev) =>
@@ -76,6 +114,7 @@ export default function CFOChatPage() {
               : m
           )
         )
+        refetchSub()
       } catch (e2) {
         setError(String(e2))
         setMessages((prev) => prev.filter((m) => m.id !== assistantId))
@@ -92,6 +131,22 @@ export default function CFOChatPage() {
     }
   }
 
+  async function handleSubscribe() {
+    if (!subscriptionFeeWei) {
+      setError('Could not read subscription fee from contract. Please try again.')
+      return
+    }
+    try {
+      await subscribe(subscriptionFeeWei)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const feeEth = subscriptionFeeWei
+    ? (Number(subscriptionFeeWei) / 1e18).toFixed(4)
+    : '…'
+
   return (
     <Shell pendingCount={0}>
       <div className="page-heading">
@@ -106,8 +161,82 @@ export default function CFOChatPage() {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 800 }}>
 
-        {/* Suggested prompts */}
-        {messages.length === 0 && (
+        {/* ── Subscription / quota banner ─────────────────────────────────── */}
+        {status && (
+          <section className="card" style={{ padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 20 }}>{status.is_subscribed ? '✅' : '🆓'}</span>
+              <div>
+                {status.is_subscribed ? (
+                  <p style={{ margin: 0, fontWeight: 600, fontSize: 14 }}>
+                    Subscribed — unlimited AI calls
+                  </p>
+                ) : (
+                  <p style={{ margin: 0, fontWeight: 600, fontSize: 14 }}>
+                    Free tier: {status.free_calls_remaining} / {FREE_CALLS_LIMIT} calls remaining
+                  </p>
+                )}
+                {!status.is_subscribed && (
+                  <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>
+                    Period resets {new Date(status.period_end).toLocaleDateString()}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Free-tier progress bar */}
+            {!status.is_subscribed && (
+              <div style={{ flex: 1, minWidth: 120, maxWidth: 200 }}>
+                <div style={{ height: 6, borderRadius: 3, background: 'var(--border)' }}>
+                  <div style={{
+                    height: '100%',
+                    borderRadius: 3,
+                    width: `${(status.free_calls_used / FREE_CALLS_LIMIT) * 100}%`,
+                    background: status.free_calls_remaining === 0 ? '#ef4444' : 'var(--accent)',
+                    transition: 'width 0.3s',
+                  }} />
+                </div>
+              </div>
+            )}
+
+            {/* Subscribe button — shown when free tier is exhausted or as upsell */}
+            {!status.is_subscribed && (
+              <button
+                className="primary-button"
+                style={{ whiteSpace: 'nowrap', padding: '8px 16px', fontSize: 13 }}
+                disabled={paying}
+                onClick={handleSubscribe}
+              >
+                {paying ? 'Signing…' : `Subscribe · ${feeEth} CELO / 28 days (~$5)`}
+              </button>
+            )}
+          </section>
+        )}
+
+        {subError && <div className="form-error">{subError}</div>}
+
+        {/* ── Quota exhausted wall ────────────────────────────────────────── */}
+        {status && !status.ai_allowed && (
+          <section className="card" style={{ padding: '32px 24px', textAlign: 'center' }}>
+            <p style={{ fontSize: 32, margin: 0 }}>🔒</p>
+            <h3 style={{ margin: '12px 0 6px' }}>Free AI calls used up</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 20px' }}>
+              You've used all {FREE_CALLS_LIMIT} free calls for this period.<br />
+              Pay the on-chain subscription to unlock unlimited AI access.<br />
+              Your gas is funded from the subscription fee.
+            </p>
+            <button
+              className="primary-button"
+              disabled={paying}
+              onClick={handleSubscribe}
+            >
+              {paying ? 'Waiting for signature…' : `Pay ${feeEth} CELO to subscribe (~$5 / 28 days)`}
+            </button>
+          </section>
+        )}
+
+        {/* ── Suggested prompts ───────────────────────────────────────────── */}
+        {messages.length === 0 && status?.ai_allowed && (
           <section className="card" style={{ padding: '20px 24px' }}>
             <p className="card-kicker">Try asking</p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
@@ -125,7 +254,7 @@ export default function CFOChatPage() {
           </section>
         )}
 
-        {/* Chat thread */}
+        {/* ── Chat thread ─────────────────────────────────────────────────── */}
         {messages.length > 0 && (
           <section className="card" style={{ padding: '20px 24px' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -139,7 +268,6 @@ export default function CFOChatPage() {
                     alignItems: 'flex-start',
                   }}
                 >
-                  {/* Avatar */}
                   <div style={{
                     width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
                     background: m.role === 'user' ? 'var(--accent)' : '#1a1a2e',
@@ -149,7 +277,6 @@ export default function CFOChatPage() {
                     {m.role === 'user' ? 'JD' : '🤖'}
                   </div>
 
-                  {/* Bubble */}
                   <div style={{ maxWidth: '75%' }}>
                     <div style={{
                       padding: '12px 16px',
@@ -166,7 +293,6 @@ export default function CFOChatPage() {
                       )}
                     </div>
 
-                    {/* Risk flags */}
                     {m.risk_flags && m.risk_flags.length > 0 && (
                       <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                         {m.risk_flags.map((f, i) => (
@@ -177,7 +303,6 @@ export default function CFOChatPage() {
                       </div>
                     )}
 
-                    {/* Proposals created */}
                     {m.proposals_created && m.proposals_created.length > 0 && (
                       <div style={{ marginTop: 8 }}>
                         <a href="/proposals" style={{ fontSize: 12, color: 'var(--accent)', textDecoration: 'underline' }}>
@@ -195,40 +320,44 @@ export default function CFOChatPage() {
 
         {error && <div className="form-error">{error}</div>}
 
-        {/* Input */}
-        <div style={{ display: 'flex', gap: 10 }}>
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKey}
-            placeholder="Ask your CFO anything, or say 'pay 200 USDC to 0x…'"
-            rows={2}
-            disabled={busy}
-            style={{
-              flex: 1,
-              padding: '12px 16px',
-              borderRadius: 12,
-              border: '1px solid var(--border)',
-              fontSize: 14,
-              resize: 'none',
-              fontFamily: 'inherit',
-              background: 'var(--surface)',
-              color: 'var(--text)',
-              outline: 'none',
-            }}
-          />
-          <button
-            className="primary-button"
-            style={{ alignSelf: 'flex-end', height: 44, padding: '0 20px' }}
-            disabled={busy || !input.trim()}
-            onClick={() => send()}
-          >
-            {busy ? <Icon name="clock" size={17} /> : <Icon name="arrow" size={17} />}
-          </button>
-        </div>
-        <p style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
-          Press Enter to send · Shift+Enter for a newline · The agent can create proposals and flag anomalies
-        </p>
+        {/* ── Input ───────────────────────────────────────────────────────── */}
+        {status?.ai_allowed && (
+          <>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKey}
+                placeholder="Ask your CFO anything, or say 'pay 200 USDC to 0x…'"
+                rows={2}
+                disabled={busy}
+                style={{
+                  flex: 1,
+                  padding: '12px 16px',
+                  borderRadius: 12,
+                  border: '1px solid var(--border)',
+                  fontSize: 14,
+                  resize: 'none',
+                  fontFamily: 'inherit',
+                  background: 'var(--surface)',
+                  color: 'var(--text)',
+                  outline: 'none',
+                }}
+              />
+              <button
+                className="primary-button"
+                style={{ alignSelf: 'flex-end', height: 44, padding: '0 20px' }}
+                disabled={busy || !input.trim()}
+                onClick={() => send()}
+              >
+                {busy ? <Icon name="clock" size={17} /> : <Icon name="arrow" size={17} />}
+              </button>
+            </div>
+            <p style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
+              Press Enter to send · Shift+Enter for a newline · The agent can create proposals and flag anomalies
+            </p>
+          </>
+        )}
       </div>
 
       <style>{`

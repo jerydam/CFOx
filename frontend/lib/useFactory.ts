@@ -5,9 +5,12 @@
  * signed by the user's wallet — not the backend agent.  This hook handles the
  * on-chain call; the backend is only contacted afterward to register the
  * resulting addresses in the DB.
+ *
+ * The agentWallet is now set in the factory constructor (from deployer env) —
+ * founders no longer need to supply it.
  */
 
-import { useWriteContract, useWaitForTransactionReceipt, usePublicClient } from 'wagmi'
+import { useWriteContract, usePublicClient } from 'wagmi'
 import { useState } from 'react'
 import { parseUnits, decodeEventLog } from 'viem'
 
@@ -20,7 +23,6 @@ const FACTORY_ABI = [
     stateMutability: 'nonpayable',
     inputs: [
       { name: 'founderName',  type: 'string' },
-      { name: 'agentWallet',  type: 'address' },
       { name: 'usdcAddress',  type: 'address' },
       { name: 'perTxLimit',   type: 'uint256' },
       { name: 'dailyLimit',   type: 'uint256' },
@@ -31,6 +33,13 @@ const FACTORY_ABI = [
       { name: 'treasury',   type: 'address' },
       { name: 'policy',     type: 'address' },
     ],
+  },
+  {
+    name: 'subscriptionFee',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
   },
   {
     name: 'CFOxDeployed',
@@ -49,12 +58,6 @@ const FACTORY_ABI = [
 function getFactoryAddress(): `0x${string}` {
   const addr = process.env.NEXT_PUBLIC_FACTORY_CONTRACT
   if (!addr?.startsWith('0x')) throw new Error('NEXT_PUBLIC_FACTORY_CONTRACT not set')
-  return addr as `0x${string}`
-}
-
-function getAgentWallet(): `0x${string}` {
-  const addr = process.env.NEXT_PUBLIC_AGENT_WALLET
-  if (!addr?.startsWith('0x')) throw new Error('NEXT_PUBLIC_AGENT_WALLET not set')
   return addr as `0x${string}`
 }
 
@@ -112,14 +115,13 @@ export function useFactory() {
       const dailyRaw  = parseUnits(String(params.dailyLimit),  6)
       const weeklyRaw = parseUnits(String(params.weeklyLimit), 6)
 
-      // 1. Send tx from user wallet
+      // 1. Send tx from user wallet (agentWallet is set in factory constructor)
       const txHash = await writeContractAsync({
         address: getFactoryAddress(),
         abi: FACTORY_ABI,
         functionName: 'deploy',
         args: [
           params.founderName || 'Founder',
-          getAgentWallet(),
           getUsdcAddress(),
           perTxRaw,
           dailyRaw,
@@ -157,7 +159,7 @@ export function useFactory() {
       }
 
       // 3. Register in backend DB
-      const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      const BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
       const res = await fetch(`${BASE}/api/factory/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -132,7 +132,8 @@ export default function OverviewPage() {
                   <h2>{money(totalUsd)} <span className="trend">{balance?.is_paused ? '⏸' : '✓'}</span></h2>
                 </div>
               </div>
-              <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 12 }}>
+              <div className="table-wrap" style={{ margin: '12px -21px -21px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 0 }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border)' }}>
                     <th style={{ textAlign: 'left', padding: '6px 0', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Token</th>
@@ -162,6 +163,7 @@ export default function OverviewPage() {
                   )}
                 </tbody>
               </table>
+              </div>
               <div style={{ marginTop: 16, padding: '10px 14px', background: 'var(--accent-light, #f4f9f6)', borderRadius: 8, fontSize: 12, color: 'var(--text-muted)' }}>
                 Treasury address: <code style={{ fontFamily: 'monospace' }}>{balance?.address ? shortAddr(balance.address) : '—'}</code>
               </div>

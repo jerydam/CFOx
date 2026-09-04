@@ -19,7 +19,16 @@ const navItems: { label: string; icon: IconName; href: string; badge?: boolean }
   { label: 'Activity',   icon: 'clock',    href: '/activity' },
 ]
 
-export default function Sidebar({ pendingCount = 0 }: { pendingCount?: number }) {
+export default function Sidebar({
+  pendingCount = 0,
+  open = false,
+  onClose,
+}: {
+  pendingCount?: number
+  /** Whether the mobile drawer is open. Ignored on desktop widths (sidebar is always visible). */
+  open?: boolean
+  onClose?: () => void
+}) {
   const pathname = usePathname()
   const { address, isConnected } = useAccount()
   const { disconnect } = useDisconnect()
@@ -27,7 +36,14 @@ export default function Sidebar({ pendingCount = 0 }: { pendingCount?: number })
   const onOnboard = pathname === '/onboard' || pathname === '/'
 
   return (
-    <aside className="sidebar">
+    <>
+      {/* Backdrop — only rendered/visible on mobile while the drawer is open */}
+      <div
+        className={`sidebar-backdrop ${open ? 'visible' : ''}`}
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <aside className={`sidebar ${open ? 'sidebar-open' : ''}`}>
             <div className="brand">
         <Image
           src="/logo.png"
@@ -55,7 +71,7 @@ export default function Sidebar({ pendingCount = 0 }: { pendingCount?: number })
         <p className="nav-label">Workspace</p>
 
         {!treasuryId && !onOnboard && (
-          <Link href="/onboard" className="nav-item" style={{ background: 'var(--accent-light)', color: 'var(--accent)', fontWeight: 600 }}>
+          <Link href="/onboard" className="nav-item" style={{ background: 'var(--accent-light)', color: 'var(--accent)', fontWeight: 600 }} onClick={onClose}>
             <Icon name="zap" />
             <span>Deploy suite</span>
           </Link>
@@ -64,7 +80,7 @@ export default function Sidebar({ pendingCount = 0 }: { pendingCount?: number })
         {navItems.map((item) => {
           const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href))
           return (
-            <Link key={item.href} href={item.href} className={`nav-item ${isActive ? 'active' : ''}`}>
+            <Link key={item.href} href={item.href} className={`nav-item ${isActive ? 'active' : ''}`} onClick={onClose}>
               <Icon name={item.icon} />
               <span>{item.label}</span>
               {item.badge && pendingCount > 0 && <b>{pendingCount}</b>}
@@ -73,18 +89,18 @@ export default function Sidebar({ pendingCount = 0 }: { pendingCount?: number })
         })}
 
         <p className="nav-label nav-label-lower">Manage</p>
-        <Link href="/onboard" className={`nav-item ${onOnboard ? 'active' : ''}`}>
+        <Link href="/onboard" className={`nav-item ${onOnboard ? 'active' : ''}`} onClick={onClose}>
           <Icon name="plus" />
           <span>New instance</span>
         </Link>
-        <Link href="/settings" className={`nav-item ${pathname === '/settings' ? 'active' : ''}`}>
+        <Link href="/settings" className={`nav-item ${pathname === '/settings' ? 'active' : ''}`} onClick={onClose}>
           <Icon name="settings" />
           <span>Settings</span>
         </Link>
       </nav>
 
       <div className="sidebar-bottom">
-        <Link href="/docs" className="help-card" style={{ cursor: "pointer" }}>
+        <Link href="/docs" className="help-card" style={{ cursor: "pointer" }} onClick={onClose}>
           <span className="help-dot">?</span>
           <div><strong>Need a hand?</strong><span>Read the CFO guide</span></div>
           <Icon name="arrow" size={15} />
@@ -106,5 +122,6 @@ export default function Sidebar({ pendingCount = 0 }: { pendingCount?: number })
         )}
       </div>
     </aside>
+    </>
   )
 }
