@@ -15,15 +15,18 @@ from ..services.db_service import TreasuryDB, get_db
 
 router = APIRouter()
 
-# USD price oracle — hardcoded for MVP; replace with CoinGecko / Chainlink
-TOKEN_USD_PRICE: dict[str, float] = {
-    "USDC": 1.0,
-    "USDT": 1.0,
-}
+TOKEN_USD_PRICE: dict[str, float] = {"USDC": 1.0, "USDT": 1.0}
 
 
 def _get_db_service() -> TreasuryDB:
     return TreasuryDB(get_db())
+
+
+def _get_treasury_or_404(treasury_id: str, db: TreasuryDB) -> dict:
+    treasury = db.get_treasury(treasury_id)
+    if not treasury:
+        raise HTTPException(404, "Treasury not found")
+    return treasury
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
@@ -34,11 +37,10 @@ async def get_balances(
     web3: Web3Service = Depends(get_web3_service),
     db: TreasuryDB = Depends(_get_db_service),
 ):
-    treasury = db.get_treasury(treasury_id)
-    if not treasury:
-        raise HTTPException(404, "Treasury not found")
+    treasury = _get_treasury_or_404(treasury_id, db)
+    tw = web3.for_treasury(treasury)
 
-    raw_balances = web3.get_all_balances()
+    raw_balances = tw.get_all_balances()
     token_balances = []
     total_usd = Decimal("0")
 
@@ -48,14 +50,9 @@ async def get_balances(
         price = TOKEN_USD_PRICE.get(b["symbol"], 0.0)
         usd_value = human_amount * Decimal(str(price))
         total_usd += usd_value
-
         token_balances.append(TokenBalance(
-            token=b["symbol"],
-            symbol=b["symbol"],
-            address=b["address"],
-            balance=human_amount,
-            balance_usd=usd_value,
-            decimals=decimals,
+            token=b["symbol"], symbol=b["symbol"], address=b["address"],
+            balance=human_amount, balance_usd=usd_value, decimals=decimals,
         ))
 
     return TreasuryBalanceResponse(
@@ -64,7 +61,7 @@ async def get_balances(
         chain_id=treasury["chain_id"],
         balances=token_balances,
         total_usd=total_usd,
-        is_paused=web3.is_treasury_paused(),
+        is_paused=tw.is_treasury_paused(),
     )
 
 
@@ -84,10 +81,11 @@ async def get_members(
     web3: Web3Service = Depends(get_web3_service),
     db: TreasuryDB = Depends(_get_db_service),
 ):
-    # Prefer onchain data; fall back to DB if RPC is slow
+    treasury = _get_treasury_or_404(treasury_id, db)
+    tw = web3.for_treasury(treasury)
+
     try:
-        onchain = web3.get_all_members()
-        # Enrich with name/role from DB
+        onchain = tw.get_all_members()
         db_members = {m["wallet_address"]: m for m in db.get_members(treasury_id)}
         result = []
         for m in onchain:
@@ -103,7 +101,6 @@ async def get_members(
             ))
         return result
     except Exception:
-        # Fallback to DB
         db_members = db.get_members(treasury_id)
         return [
             MemberResponse(
@@ -144,18 +141,17 @@ async def get_analytics(
     web3: Web3Service = Depends(get_web3_service),
     db: TreasuryDB = Depends(_get_db_service),
 ):
+    treasury = _get_treasury_or_404(treasury_id, db)
+    tw = web3.for_treasury(treasury)
+
     monthly = db.get_monthly_burn(treasury_id, months_back)
     categories = db.get_top_categories(treasury_id, months_back)
     vendors = db.get_top_vendors(treasury_id, months_back)
 
-    # Average monthly burn
-    if monthly:
-        avg_burn = Decimal(str(sum(m["amount_usd"] for m in monthly))) / len(monthly)
-    else:
-        avg_burn = Decimal("0")
+    avg_burn = Decimal(str(sum(m["amount_usd"] for m in monthly))) / len(monthly) \
+        if monthly else Decimal("0")
 
-    # Current treasury USD
-    raw = web3.get_all_balances()
+    raw = tw.get_all_balances()
     total_usd = sum(
         Decimal(str(b["raw_balance"])) / Decimal(10 ** b["decimals"])
         * Decimal(str(TOKEN_USD_PRICE.get(b["symbol"], 0)))
@@ -182,10 +178,13 @@ async def forecast_runway(
     web3: Web3Service = Depends(get_web3_service),
     db: TreasuryDB = Depends(_get_db_service),
 ):
+    treasury = _get_treasury_or_404(treasury_id, db)
+    tw = web3.for_treasury(treasury)
+
     monthly = db.get_monthly_burn(treasury_id, 3)
     avg_burn = Decimal(str(sum(m["amount_usd"] for m in monthly) / max(len(monthly), 1)))
 
-    raw = web3.get_all_balances()
+    raw = tw.get_all_balances()
     total_usd = sum(
         Decimal(str(b["raw_balance"])) / Decimal(10 ** b["decimals"])
         * Decimal(str(TOKEN_USD_PRICE.get(b["symbol"], 0)))
@@ -194,7 +193,6 @@ async def forecast_runway(
 
     effective_treasury = total_usd - one_time_payment
     effective_burn = avg_burn + additional_monthly_burn
-
     runway_months = float(effective_treasury / effective_burn) if effective_burn > 0 else float("inf")
     runway_date = datetime.utcnow() + timedelta(days=runway_months * 30)
 
@@ -228,7 +226,6 @@ async def detect_anomaly(
     concerns = []
     risk_score = 0.0
 
-    # Check 1: New recipient?
     txs = db.get_transactions(treasury_id, limit=500, direction="out")
     known_recipients = {t["to_address"].lower() for t in txs if t.get("to_address")}
     is_new = recipient.lower() not in known_recipients
@@ -236,7 +233,6 @@ async def detect_anomaly(
         concerns.append("New recipient — no prior payment history")
         risk_score += 0.3
 
-    # Check 2: Duplicate payment (same recipient + amount in last 7 days)?
     cutoff = (datetime.utcnow() - timedelta(days=7)).isoformat()
     recent = [
         t for t in txs
@@ -249,7 +245,6 @@ async def detect_anomaly(
         concerns.append("Possible duplicate — same amount paid to this recipient in last 7 days")
         risk_score += 0.4
 
-    # Check 3: Amount deviation vs vendor history?
     vendor_txs = [t for t in txs if t.get("to_address", "").lower() == recipient.lower()]
     amount_deviation = None
     if vendor_txs:
@@ -260,14 +255,12 @@ async def detect_anomaly(
                 concerns.append(f"Amount is {amount_deviation:.0f}% above this vendor's average")
                 risk_score += 0.2
 
-    # Check 4: Large absolute amount?
     if amount > Decimal("5000"):
         concerns.append(f"Large payment: ${amount:,.2f}")
         risk_score += 0.15
     elif amount > Decimal("1000"):
         risk_score += 0.05
 
-    # Check 5: Budget overrun risk?
     budgets = db.get_budgets(treasury_id, "current_month")
     budget_after = None
     for b in budgets:
@@ -291,13 +284,9 @@ async def detect_anomaly(
         level = RiskLevel.LOW
 
     return AnomalyResponse(
-        risk_level=level,
-        risk_score=min(risk_score, 1.0),
-        concerns=concerns,
-        is_new_recipient=is_new,
-        is_duplicate=is_duplicate,
-        amount_deviation_pct=amount_deviation,
-        budget_utilization_after=budget_after,
+        risk_level=level, risk_score=min(risk_score, 1.0), concerns=concerns,
+        is_new_recipient=is_new, is_duplicate=is_duplicate,
+        amount_deviation_pct=amount_deviation, budget_utilization_after=budget_after,
     )
 
 
@@ -305,8 +294,10 @@ async def detect_anomaly(
 async def get_policy(
     treasury_id: str,
     web3: Web3Service = Depends(get_web3_service),
+    db: TreasuryDB = Depends(_get_db_service),
 ):
-    return web3.get_policy()
+    treasury = _get_treasury_or_404(treasury_id, db)
+    return web3.for_treasury(treasury).get_policy()
 
 
 @router.post("/{treasury_id}/escalate")
@@ -323,5 +314,4 @@ async def escalate(
         "risk_score": {"LOW": 0.1, "MEDIUM": 0.4, "HIGH": 0.7, "CRITICAL": 0.9}.get(risk_level, 0.5),
         "input": context or {},
     })
-    # TODO: send notifications (Telegram / Discord / email)
     return {"escalation_id": action["id"], "status": "sent"}

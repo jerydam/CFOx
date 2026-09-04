@@ -5,21 +5,19 @@ import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 
-from .api import treasury, proposals, agent
-from .workers.indexer import start_indexer
+from .api import treasury, proposals, agent, factory
 
-
+load_dotenv() 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Start blockchain indexer as background task
+    from .workers.indexer import start_indexer
     treasury_id = os.getenv("DEFAULT_TREASURY_ID")
     indexer_task = None
     if treasury_id:
         indexer_task = asyncio.create_task(start_indexer(treasury_id))
-
     yield
-
     if indexer_task:
         indexer_task.cancel()
         try:
@@ -46,6 +44,7 @@ app.add_middleware(
 app.include_router(treasury.router,  prefix="/api/treasuries", tags=["treasury"])
 app.include_router(proposals.router, prefix="/api/proposals",  tags=["proposals"])
 app.include_router(agent.router,     prefix="/api/agent",      tags=["agent"])
+app.include_router(factory.router,   prefix="/api/factory",    tags=["factory"])
 
 
 @app.get("/health")

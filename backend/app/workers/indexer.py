@@ -159,10 +159,33 @@ class BlockchainIndexer:
     async def _on_EquityTransferred(self, log_entry, block_ts: int):
         from_addr = _decode_address(log_entry["topics"][1])
         to_addr   = _decode_address(log_entry["topics"][2])
-        weight    = int(log_entry["data"].hex(), 16) if log_entry.get("data") else 0
-        # Re-sync both members from chain state (web3_service.get_all_members)
-        # For now just log; a full sync happens on the next member read
-        log.info(f"EquityTransferred {weight} from {from_addr} to {to_addr}")
+        data_bytes = log_entry.get("data", b"")
+        if isinstance(data_bytes, str):
+            data_bytes = bytes.fromhex(data_bytes.removeprefix("0x"))
+        weight = int.from_bytes(data_bytes[:32], "big") if len(data_bytes) >= 32 else 0
+        log.info(f"EquityTransferred {weight} bps from {from_addr} to {to_addr}")
+
+        # Sync both addresses from chain so DB stays accurate
+        try:
+            from web3 import Web3
+            from web3.middleware import ExtraDataToPOAMiddleware
+            import os, json
+            from ..services.web3_service import GOVERNANCE_ABI
+            w3 = Web3(Web3.HTTPProvider(os.getenv("RPC_URL", "https://forno.celo.org")))
+            w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+            gov = w3.eth.contract(
+                address=Web3.to_checksum_address(self.governance_address),
+                abi=GOVERNANCE_ABI,
+            )
+            for addr in (from_addr, to_addr):
+                m = gov.functions.getMember(Web3.to_checksum_address(addr)).call()
+                self.db.upsert_member(self.treasury_id, addr, {
+                    "equity_weight": m[1],
+                    "active": m[2],
+                    "updated_at": datetime.utcfromtimestamp(block_ts).isoformat(),
+                })
+        except Exception as e:
+            log.error(f"EquityTransferred weight sync failed: {e}")
 
     async def _on_ProposalCreated(self, log_entry, block_ts: int):
         proposal_id   = int(log_entry["topics"][1].hex(), 16)
@@ -178,22 +201,49 @@ class BlockchainIndexer:
         })
 
     async def _on_ProposalApproved(self, log_entry, block_ts: int):
-        proposal_id     = int(log_entry["topics"][1].hex(), 16)
-        signer          = _decode_address(log_entry["topics"][2])
-        # weight and totalApproved are in data (non-indexed)
-        if len(log_entry.get("data", b"")) >= 64:
-            data_hex = log_entry["data"].hex()
-            weight       = int(data_hex[:64], 16)
-            total_weight = int(data_hex[64:128], 16)
-        else:
-            weight = total_weight = 0
+        onchain_id = int(log_entry["topics"][1].hex(), 16)
+        signer     = _decode_address(log_entry["topics"][2])
 
-        self.db.add_signature(
-            proposal_id=str(proposal_id),
-            signer=signer,
-            weight=weight,
-            signature="onchain",  # signature was submitted directly to contract
-        )
+        # weight (uint256) and totalApproved (uint256) are in non-indexed data
+        data_bytes = log_entry.get("data", b"")
+        if isinstance(data_bytes, str):
+            data_bytes = bytes.fromhex(data_bytes.removeprefix("0x"))
+        weight = total_weight = 0
+        if len(data_bytes) >= 64:
+            weight       = int.from_bytes(data_bytes[:32],  "big")
+            total_weight = int.from_bytes(data_bytes[32:64], "big")
+
+        # Look up the DB proposal UUID by onchain id
+        try:
+            r = (self.db.db.table("proposals")
+                 .select("id, status, required_weight")
+                 .eq("treasury_id", self.treasury_id)
+                 .eq("proposal_id_onchain", onchain_id)
+                 .single()
+                 .execute())
+            if not r.data:
+                log.warning(f"ProposalApproved: no DB row for onchain_id={onchain_id}")
+                return
+            db_proposal_id = r.data["id"]
+            required       = r.data["required_weight"]
+        except Exception as e:
+            log.error(f"ProposalApproved DB lookup failed: {e}")
+            return
+
+        # Record signature (idempotent — UNIQUE(proposal_id, signer) prevents duplicates)
+        try:
+            self.db.add_signature(
+                proposal_id=db_proposal_id,
+                signer=signer,
+                weight=weight,
+                signature="onchain",
+            )
+        except Exception:
+            pass  # Already recorded (e.g. via /sign endpoint before indexer caught up)
+
+        # Promote to APPROVED if threshold reached
+        if total_weight >= required:
+            self.db.update_proposal_status(db_proposal_id, "APPROVED")
 
     async def _on_ProposalExecuted(self, log_entry, block_ts: int):
         proposal_id = int(log_entry["topics"][1].hex(), 16)
@@ -206,11 +256,12 @@ class BlockchainIndexer:
     async def _on_TreasuryPayment(self, log_entry, block_ts: int):
         token     = _decode_address(log_entry["topics"][1])
         recipient = _decode_address(log_entry["topics"][2])
-        amount    = int(log_entry["data"].hex(), 16) if log_entry.get("data") else 0
+        amount    = _decode_uint256(log_entry.get("data", b""))
+        tx_hash   = _decode_hex(log_entry["transactionHash"])
 
         self.db.insert_transaction(self.treasury_id, {
-            "tx_hash":     log_entry["transactionHash"].hex(),
-            "chain_id":    self.w3.eth.chain_id,
+            "tx_hash":      tx_hash,
+            "chain_id":     self.w3.eth.chain_id,
             "from_address": self.treasury_address,
             "to_address":   recipient,
             "token":        token,
@@ -221,12 +272,13 @@ class BlockchainIndexer:
         })
 
     async def _on_Deposited(self, log_entry, block_ts: int):
-        sender = _decode_address(log_entry["topics"][1])
-        amount = int(log_entry["data"].hex(), 16) if log_entry.get("data") else 0
+        sender  = _decode_address(log_entry["topics"][1])
+        amount  = _decode_uint256(log_entry.get("data", b""))
+        tx_hash = _decode_hex(log_entry["transactionHash"])
 
         self.db.insert_transaction(self.treasury_id, {
-            "tx_hash":     log_entry["transactionHash"].hex(),
-            "chain_id":    self.w3.eth.chain_id,
+            "tx_hash":      tx_hash,
+            "chain_id":     self.w3.eth.chain_id,
             "from_address": sender,
             "to_address":   self.treasury_address,
             "token":        "0x0000000000000000000000000000000000000000",
@@ -245,8 +297,22 @@ class BlockchainIndexer:
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-def _decode_address(topic: bytes) -> str:
-    return "0x" + topic.hex()[-40:]
+def _decode_address(topic) -> str:
+    if isinstance(topic, bytes):
+        return "0x" + topic.hex()[-40:]
+    return "0x" + str(topic)[-40:]
+
+def _decode_uint256(data) -> int:
+    if not data:
+        return 0
+    if isinstance(data, str):
+        data = bytes.fromhex(data.removeprefix("0x"))
+    return int.from_bytes(data[:32], "big") if len(data) >= 32 else 0
+
+def _decode_hex(val) -> str:
+    if isinstance(val, bytes):
+        return val.hex()
+    return str(val)
 
 
 def _proposal_type_name(type_int: int) -> str:

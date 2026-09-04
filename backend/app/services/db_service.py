@@ -104,6 +104,27 @@ class TreasuryDB:
         return r.data
 
     def create_proposal(self, data: dict) -> dict:
+        # If an onchain id is provided, upsert to handle the race between
+        # the API creating the row and the indexer picking up ProposalCreated
+        onchain_id = data.get("proposal_id_onchain")
+        treasury_id = data.get("treasury_id")
+        if onchain_id and treasury_id:
+            # Check if indexer already wrote this row
+            existing = (self.db.table("proposals")
+                        .select("*")
+                        .eq("treasury_id", treasury_id)
+                        .eq("proposal_id_onchain", onchain_id)
+                        .execute())
+            if existing.data:
+                # Update with richer metadata from the API call (title, description, etc.)
+                row_id = existing.data[0]["id"]
+                update_data = {k: v for k, v in data.items()
+                               if k not in ("treasury_id", "proposal_id_onchain") and v is not None}
+                r = (self.db.table("proposals")
+                     .update(update_data)
+                     .eq("id", row_id)
+                     .execute())
+                return r.data[0] if r.data else existing.data[0]
         r = self.db.table("proposals").insert(data).execute()
         return r.data[0]
 
@@ -115,20 +136,26 @@ class TreasuryDB:
         return r.data[0]
 
     def add_signature(self, proposal_id: str, signer: str, weight: int, signature: str) -> dict:
-        r = self.db.table("proposal_signatures").insert({
+        # Upsert on (proposal_id, signer) unique constraint — idempotent if indexer
+        # and /sign endpoint both record the same approval
+        r = self.db.table("proposal_signatures").upsert({
             "proposal_id": proposal_id,
             "signer": signer.lower(),
             "weight": weight,
             "signature": signature,
             "signed_at": datetime.utcnow().isoformat(),
-        }).execute()
-        # Update approved_weight on proposal
-        current = self.get_proposal(proposal_id)
-        new_weight = (current.get("approved_weight") or 0) + weight
+        }, on_conflict="proposal_id,signer").execute()
+
+        # Recompute approved_weight from scratch to avoid double-counting races
+        sigs_r = (self.db.table("proposal_signatures")
+                  .select("weight")
+                  .eq("proposal_id", proposal_id)
+                  .execute())
+        new_weight = sum(s["weight"] for s in sigs_r.data)
         self.db.table("proposals").update({
             "approved_weight": new_weight,
         }).eq("id", proposal_id).execute()
-        return r.data[0]
+        return r.data[0] if r.data else {}
 
     # ─── Budgets ─────────────────────────────────────────────────────────────
 
@@ -240,4 +267,55 @@ class TreasuryDB:
             **action,
             "created_at": datetime.utcnow().isoformat(),
         }).execute()
+        return r.data[0]
+
+    def get_or_create_org(self, founder_address: str, name: str) -> dict:
+        r = (self.db.table("organizations")
+             .select("*")
+             .eq("created_by", founder_address.lower())
+             .limit(1)
+             .execute())
+        if r.data:
+            return r.data[0]
+        slug = name.lower().replace(" ", "-")[:40]
+        r2 = self.db.table("organizations").insert({
+            "name": name,
+            "slug": slug,
+            "created_by": founder_address.lower(),
+        }).execute()
+        return r2.data[0]
+
+    def create_treasury(
+        self, org_id: str, address: str, chain_id: int, name: str,
+        governance_address: str = None, policy_address: str = None,
+        factory_address: str = None,
+    ) -> dict:
+        payload = {
+            "organization_id": org_id,
+            "address": address.lower(),
+            "chain_id": chain_id,
+            "name": name,
+        }
+        if governance_address:
+            payload["governance_address"] = governance_address.lower()
+        if policy_address:
+            payload["policy_address"] = policy_address.lower()
+        if factory_address:
+            payload["factory_address"] = factory_address.lower()
+        r = self.db.table("treasuries").insert(payload).execute()
+        return r.data[0]
+
+    def get_treasury_by_address(self, address: str) -> dict | None:
+        r = (self.db.table("treasuries")
+             .select("*")
+             .eq("address", address.lower())
+             .limit(1)
+             .execute())
+        return r.data[0] if r.data else None
+
+    def upsert_policy(self, treasury_id: str, data: dict) -> dict:
+        r = self.db.table("policies").upsert({
+            "treasury_id": treasury_id,
+            **data,
+        }, on_conflict="treasury_id").execute()
         return r.data[0]

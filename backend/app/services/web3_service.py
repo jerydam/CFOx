@@ -1,30 +1,18 @@
 """
 Web3 Service — connects the FastAPI backend to the deployed CFOx contracts.
 
-This is the layer that was previously missing (all 501s).
-Handles:
-- Reading onchain state (balances, members, proposals)
-- Submitting transactions (agent wallet signs on behalf of the AI)
-- Event listening (used by the indexer worker)
-
-The agent wallet has 0% equity — it can only call:
-  - governance.createPaymentProposal()
-  - governance.execute()  (after threshold is met)
-  
-It CANNOT approve proposals (that's equity holders only).
+Factory-aware: contract addresses are loaded per-treasury from the DB,
+not hardcoded in .env. Only FACTORY_CONTRACT lives in env.
 """
 
 import os
 import json
 from decimal import Decimal
-from pathlib import Path
 from web3 import Web3
 from web3.middleware import ExtraDataToPOAMiddleware
 from eth_account import Account
 
-# ─── ABI loading ─────────────────────────────────────────────────────────────
-# In production, load from compiled Foundry artifacts (out/ContractName.sol/ContractName.json)
-# For now we define minimal ABIs inline for the functions we call.
+# ─── ABIs ─────────────────────────────────────────────────────────────────────
 
 GOVERNANCE_ABI = json.loads("""[
   {"type":"function","name":"createPaymentProposal",
@@ -152,61 +140,236 @@ ERC20_ABI = json.loads("""[
    "stateMutability":"view"}
 ]""")
 
+FACTORY_ABI = json.loads("""[
+  {"type":"function","name":"deploy",
+   "inputs":[
+     {"name":"founderName","type":"string"},
+     {"name":"agentWallet","type":"address"},
+     {"name":"usdcAddress","type":"address"},
+     {"name":"perTxLimit","type":"uint256"},
+     {"name":"dailyLimit","type":"uint256"},
+     {"name":"weeklyLimit","type":"uint256"}
+   ],
+   "outputs":[
+     {"name":"governance","type":"address"},
+     {"name":"treasury","type":"address"},
+     {"name":"policy","type":"address"}
+   ],
+   "stateMutability":"nonpayable"},
+
+  {"type":"function","name":"getInstance",
+   "inputs":[{"name":"founder","type":"address"}],
+   "outputs":[{"components":[
+     {"name":"governance","type":"address"},
+     {"name":"treasury","type":"address"},
+     {"name":"policy","type":"address"},
+     {"name":"founder","type":"address"},
+     {"name":"deployedAt","type":"uint256"}
+   ],"name":"","type":"tuple"}],
+   "stateMutability":"view"},
+
+  {"type":"function","name":"hasInstance",
+   "inputs":[{"name":"founder","type":"address"}],
+   "outputs":[{"name":"","type":"bool"}],
+   "stateMutability":"view"},
+
+  {"type":"function","name":"totalDeployed",
+   "inputs":[],"outputs":[{"name":"","type":"uint256"}],
+   "stateMutability":"view"},
+
+  {"type":"event","name":"CFOxDeployed",
+   "inputs":[
+     {"name":"founder","type":"address","indexed":true},
+     {"name":"governance","type":"address","indexed":false},
+     {"name":"treasury","type":"address","indexed":false},
+     {"name":"policy","type":"address","indexed":false}
+   ]}
+]""")
+
+
+# ─── Base service (factory + agent wallet only) ───────────────────────────────
 
 class Web3Service:
     """
-    Single entry point for all blockchain interactions.
-    Instantiated once at app startup and injected via FastAPI dependency.
+    Base Web3 service — holds the agent wallet and factory contract only.
+    Per-treasury contract instances are created on demand via for_treasury().
+    This means NO env vars for GOVERNANCE_CONTRACT / TREASURY_CONTRACT / POLICY_CONTRACT.
+    Only FACTORY_CONTRACT is needed.
     """
 
     def __init__(self):
         rpc_url = os.getenv("RPC_URL", "https://forno.celo.org")
         self.w3 = Web3(Web3.HTTPProvider(rpc_url))
-        # Celo / BOT Chain use POA — add middleware
         self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 
         assert self.w3.is_connected(), f"Cannot connect to RPC: {rpc_url}"
 
-        # Agent wallet (0% equity — only creates/executes proposals)
+        # Agent wallet — signs all backend-submitted txs
         agent_key = os.getenv("AGENT_PRIVATE_KEY")
         assert agent_key, "AGENT_PRIVATE_KEY not set"
         self.agent_account = Account.from_key(agent_key)
 
-        # Contract addresses
-        self.governance_address  = Web3.to_checksum_address(os.getenv("GOVERNANCE_CONTRACT"))
-        self.treasury_address    = Web3.to_checksum_address(os.getenv("TREASURY_CONTRACT"))
-        self.policy_address      = Web3.to_checksum_address(os.getenv("POLICY_CONTRACT"))
+        # Factory — the only contract address that lives in env
+        factory_addr = os.getenv("FACTORY_CONTRACT")
+        if factory_addr:
+            self.factory_address = Web3.to_checksum_address(factory_addr)
+            self.factory = self.w3.eth.contract(
+                address=self.factory_address, abi=FACTORY_ABI
+            )
+        else:
+            self.factory_address = None
+            self.factory = None
 
-        # Contract instances
-        self.governance = self.w3.eth.contract(
-            address=self.governance_address, abi=GOVERNANCE_ABI
-        )
-        self.treasury = self.w3.eth.contract(
-            address=self.treasury_address, abi=TREASURY_ABI
-        )
-        self.policy = self.w3.eth.contract(
-            address=self.policy_address, abi=POLICY_ABI
-        )
+        self.chain_id = self.w3.eth.chain_id
 
-        # Token registry {symbol: {address, decimals}}
+        # Token registry — shared across all treasuries
         self.tokens: dict[str, dict] = self._load_token_registry()
+
+    def _load_token_registry(self) -> dict:
+        registry = {}
+        usdc = os.getenv("USDC_ADDRESS")
+        if usdc:
+            registry["USDC"] = {"address": Web3.to_checksum_address(usdc), "decimals": 6}
+        weth = os.getenv("WETH_ADDRESS")
+        if weth:
+            registry["WETH"] = {"address": Web3.to_checksum_address(weth), "decimals": 18}
+        return registry
+
+    def _get_gas_price(self) -> int:
+        return int(self.w3.eth.gas_price * 1.1)
+
+    def _get_token(self, symbol: str) -> dict:
+        key = symbol.upper()
+        if key not in self.tokens:
+            raise ValueError(f"Unknown token: {symbol}. Allowed: {list(self.tokens)}")
+        return self.tokens[key]
+
+    # ─── Per-treasury contract binding ────────────────────────────────────────
+
+    def for_treasury(self, treasury_row: dict) -> "TreasuryWeb3":
+        """
+        Return a treasury-scoped Web3 helper bound to the contract addresses
+        stored in the DB row. Call this in every API route that needs onchain data.
+
+        treasury_row must have: address, governance_address, policy_address
+        """
+        return TreasuryWeb3(self, treasury_row)
+
+    # ─── Factory operations ───────────────────────────────────────────────────
+
+    def get_instance(self, founder_address: str) -> dict | None:
+        """Read the onchain CFOxInstance struct for a founder."""
+        if not self.factory:
+            raise RuntimeError("FACTORY_CONTRACT not configured")
+        checksum = Web3.to_checksum_address(founder_address)
+        result = self.factory.functions.getInstance(checksum).call()
+        return {
+            "governance": result[0],
+            "treasury":   result[1],
+            "policy":     result[2],
+            "founder":    result[3],
+            "deployed_at": result[4],
+        }
+
+    def deploy_instance(
+        self,
+        founder_address: str,
+        founder_name: str,
+        usdc_address: str,
+        per_tx_limit: int,
+        daily_limit: int,
+        weekly_limit: int,
+    ) -> dict:
+        """Call factory.deploy() from the agent wallet. Returns addresses + tx_hash."""
+        if not self.factory:
+            raise RuntimeError("FACTORY_CONTRACT not configured")
+
+        tx = self.factory.functions.deploy(
+            founder_name,
+            self.agent_account.address,
+            Web3.to_checksum_address(usdc_address),
+            per_tx_limit,
+            daily_limit,
+            weekly_limit,
+        ).build_transaction({
+            "from": self.agent_account.address,
+            "nonce": self.w3.eth.get_transaction_count(self.agent_account.address),
+            "gas": 8_000_000,
+            "gasPrice": self._get_gas_price(),
+        })
+
+        signed = self.agent_account.sign_transaction(tx)
+        tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+        receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+
+        if receipt["status"] != 1:
+            raise RuntimeError(f"Factory deploy reverted: {tx_hash.hex()}")
+
+        # Parse CFOxDeployed event — handle HexBytes or plain str
+        deployed_topic = Web3.keccak(text="CFOxDeployed(address,address,address,address)")
+        gov_addr = treas_addr = policy_addr = None
+        for log in receipt.get("logs", []):
+            if log["topics"] and log["topics"][0] == deployed_topic:
+                raw = log["data"]
+                data_bytes = bytes(raw) if isinstance(raw, (bytes, bytearray)) \
+                    else bytes.fromhex(raw.removeprefix("0x"))
+                decoded = self.w3.codec.decode(
+                    ["address", "address", "address"], data_bytes
+                )
+                gov_addr, treas_addr, policy_addr = decoded
+                break
+
+        if not gov_addr:
+            raise RuntimeError("CFOxDeployed event not found in receipt")
+
+        return {
+            "tx_hash": tx_hash.hex(),
+            "governance_address": gov_addr,
+            "treasury_address":   treas_addr,
+            "policy_address":     policy_addr,
+        }
+
+
+# ─── Per-treasury scoped helper ───────────────────────────────────────────────
+
+class TreasuryWeb3:
+    """
+    Wraps Web3Service with contract instances bound to a specific treasury.
+    Created fresh per request from the DB row — no singleton state per treasury.
+    """
+
+    def __init__(self, base: Web3Service, treasury_row: dict):
+        self.base = base
+        self.w3 = base.w3
+        self.agent_account = base.agent_account
+        self.tokens = base.tokens
+
+        self.treasury_address    = Web3.to_checksum_address(treasury_row["address"])
+        self.governance_address  = Web3.to_checksum_address(treasury_row["governance_address"])
+        self.policy_address      = Web3.to_checksum_address(treasury_row["policy_address"])
+
+        self.governance = self.w3.eth.contract(address=self.governance_address, abi=GOVERNANCE_ABI)
+        self.treasury   = self.w3.eth.contract(address=self.treasury_address,   abi=TREASURY_ABI)
+        self.policy     = self.w3.eth.contract(address=self.policy_address,     abi=POLICY_ABI)
+
+    def _get_gas_price(self) -> int:
+        return self.base._get_gas_price()
+
+    def _get_token(self, symbol: str) -> dict:
+        return self.base._get_token(symbol)
 
     # ─── Treasury reads ───────────────────────────────────────────────────────
 
     def get_native_balance(self) -> int:
-        """Raw balance in wei."""
         return self.w3.eth.get_balance(self.treasury_address)
 
     def get_token_balance(self, token_symbol: str) -> int:
-        """Raw balance in token base units."""
         token = self._get_token(token_symbol)
         erc20 = self.w3.eth.contract(address=token["address"], abi=ERC20_ABI)
         return erc20.functions.balanceOf(self.treasury_address).call()
 
     def get_all_balances(self) -> list[dict]:
-        """Returns list of {symbol, address, raw_balance, decimals}."""
         balances = []
-        # Native token
         native_bal = self.get_native_balance()
         balances.append({
             "symbol": "CELO",
@@ -214,7 +377,6 @@ class Web3Service:
             "raw_balance": native_bal,
             "decimals": 18,
         })
-        # ERC20 tokens
         for symbol, info in self.tokens.items():
             try:
                 raw = self.get_token_balance(symbol)
@@ -231,10 +393,33 @@ class Web3Service:
     def is_treasury_paused(self) -> bool:
         return self.treasury.functions.isPaused().call()
 
+    def pause_treasury(self, reason: str) -> str:
+        tx = self.treasury.functions.emergencyPause(reason).build_transaction({
+            "from": self.agent_account.address,
+            "nonce": self.w3.eth.get_transaction_count(self.agent_account.address),
+            "gas": 100_000,
+            "gasPrice": self._get_gas_price(),
+        })
+        signed = self.agent_account.sign_transaction(tx)
+        tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+        self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+        return tx_hash.hex()
+
+    def unpause_treasury(self) -> str:
+        tx = self.treasury.functions.unpause().build_transaction({
+            "from": self.agent_account.address,
+            "nonce": self.w3.eth.get_transaction_count(self.agent_account.address),
+            "gas": 100_000,
+            "gasPrice": self._get_gas_price(),
+        })
+        signed = self.agent_account.sign_transaction(tx)
+        tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+        self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+        return tx_hash.hex()
+
     # ─── Governance reads ─────────────────────────────────────────────────────
 
     def get_all_members(self) -> list[dict]:
-        """Returns member structs for all addresses ever added."""
         addresses = self.governance.functions.getMembers().call()
         members = []
         for addr in addresses:
@@ -250,17 +435,11 @@ class Web3Service:
     def get_proposal(self, proposal_id: int) -> dict:
         p = self.governance.functions.getProposal(proposal_id).call()
         return {
-            "id": p[0],
-            "proposer": p[1],
-            "proposal_type": p[2],
-            "operation_hash": p[3].hex(),
-            "required_weight": p[4],
-            "approved_weight": p[5],
-            "snapshot_block": p[6],
-            "created_at": p[7],
-            "expires_at": p[8],
-            "executed": p[9],
-            "cancelled": p[10],
+            "id": p[0], "proposer": p[1], "proposal_type": p[2],
+            "operation_hash": p[3].hex(), "required_weight": p[4],
+            "approved_weight": p[5], "snapshot_block": p[6],
+            "created_at": p[7], "expires_at": p[8],
+            "executed": p[9], "cancelled": p[10],
         }
 
     def get_proposal_count(self) -> int:
@@ -288,7 +467,7 @@ class Web3Service:
             "weekly_spent": self.policy.functions.getWeeklySpend().call(),
         }
 
-    # ─── Transactions (agent wallet submits) ─────────────────────────────────
+    # ─── Transactions ─────────────────────────────────────────────────────────
 
     def create_payment_proposal(
         self,
@@ -297,11 +476,6 @@ class Web3Service:
         amount_human: Decimal,
         description: str,
     ) -> dict:
-        """
-        Submit createPaymentProposal() to governance contract.
-        Signed by the agent wallet (0% equity).
-        Returns {tx_hash, proposal_id}.
-        """
         token = self._get_token(token_symbol)
         amount_raw = int(amount_human * Decimal(10 ** token["decimals"]))
 
@@ -316,7 +490,6 @@ class Web3Service:
             "gas": 300_000,
             "gasPrice": self._get_gas_price(),
         })
-
         signed = self.agent_account.sign_transaction(tx)
         tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
         receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
@@ -324,21 +497,10 @@ class Web3Service:
         if receipt["status"] != 1:
             raise RuntimeError(f"Transaction reverted: {tx_hash.hex()}")
 
-        # Parse ProposalCreated event to get the onchain proposal ID
         proposal_id = self._parse_proposal_created(receipt)
-
-        return {
-            "tx_hash": tx_hash.hex(),
-            "proposal_id": proposal_id,
-            "block": receipt["blockNumber"],
-        }
+        return {"tx_hash": tx_hash.hex(), "proposal_id": proposal_id, "block": receipt["blockNumber"]}
 
     def execute_proposal(self, proposal_id: int) -> str:
-        """
-        Submit execute() after threshold is reached.
-        Anyone can call this — agent wallet does it for UX convenience.
-        Returns tx_hash.
-        """
         tx = self.governance.functions.execute(proposal_id).build_transaction({
             "from": self.agent_account.address,
             "nonce": self.w3.eth.get_transaction_count(self.agent_account.address),
@@ -350,45 +512,12 @@ class Web3Service:
         self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
         return tx_hash.hex()
 
-    # ─── Internal ─────────────────────────────────────────────────────────────
-
-    def _get_token(self, symbol: str) -> dict:
-        key = symbol.upper()
-        if key not in self.tokens:
-            raise ValueError(f"Unknown token: {symbol}. Allowed: {list(self.tokens)}")
-        return self.tokens[key]
-
-    def _get_gas_price(self) -> int:
-        # Use current network gas price with a small buffer
-        return int(self.w3.eth.gas_price * 1.1)
-
     def _parse_proposal_created(self, receipt) -> int:
-        """Extract proposalId from ProposalCreated event logs."""
-        # ProposalCreated(uint256 indexed proposalId, ...)
-        proposal_created_topic = Web3.keccak(
-            text="ProposalCreated(uint256,uint8,bytes32,uint256)"
-        )
+        topic = Web3.keccak(text="ProposalCreated(uint256,uint8,bytes32,uint256)")
         for log in receipt.get("logs", []):
-            if log["topics"] and log["topics"][0] == proposal_created_topic:
+            if log["topics"] and log["topics"][0] == topic:
                 return int(log["topics"][1].hex(), 16)
         return 0
-
-    def _load_token_registry(self) -> dict:
-        """Load allowed tokens from env / config."""
-        usdc = os.getenv("USDC_ADDRESS")
-        registry = {}
-        if usdc:
-            registry["USDC"] = {
-                "address": Web3.to_checksum_address(usdc),
-                "decimals": 6,
-            }
-        weth = os.getenv("WETH_ADDRESS")
-        if weth:
-            registry["WETH"] = {
-                "address": Web3.to_checksum_address(weth),
-                "decimals": 18,
-            }
-        return registry
 
 
 # ─── FastAPI dependency ───────────────────────────────────────────────────────

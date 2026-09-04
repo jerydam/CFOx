@@ -1,6 +1,5 @@
 """Proposals API — create, sign, execute governance proposals."""
 
-import re
 from fastapi import APIRouter, Depends, HTTPException
 from decimal import Decimal
 
@@ -14,14 +13,118 @@ from ..services.db_service import TreasuryDB, get_db
 
 router = APIRouter()
 
-PER_TX_LIMIT_USD   = Decimal("100")
-LARGE_AMOUNT_USD   = Decimal("1000")
-MEDIUM_WEIGHT_BPS  = 5_000
-LARGE_WEIGHT_BPS   = 7_000
+# Fallback policy constants (used only when DB policy row is missing)
+_FALLBACK_PER_TX_LIMIT_USD  = Decimal("100")
+_FALLBACK_LARGE_AMOUNT_USD  = Decimal("1000")
+_FALLBACK_MEDIUM_WEIGHT_BPS = 5_000
+_FALLBACK_LARGE_WEIGHT_BPS  = 7_000
 
 
 def _get_db_service() -> TreasuryDB:
     return TreasuryDB(get_db())
+
+
+def _load_policy(treasury_id: str, db: TreasuryDB) -> dict:
+    """Read policy limits from the DB policies table.
+    Falls back to constants if no row exists yet (e.g. before first deploy)."""
+    try:
+        r = db.db.table("policies").select("*").eq("treasury_id", treasury_id).single().execute()
+        if r.data:
+            return r.data
+    except Exception:
+        pass
+    return {
+        "per_transaction_limit_usd": float(_FALLBACK_PER_TX_LIMIT_USD),
+        "large_payment_amount_usd": float(_FALLBACK_LARGE_AMOUNT_USD),
+        "medium_threshold_bps": _FALLBACK_MEDIUM_WEIGHT_BPS,
+        "large_threshold_bps": _FALLBACK_LARGE_WEIGHT_BPS,
+    }
+
+
+def _check_policy(amount: Decimal, policy: dict) -> tuple[ExecutionMode, int]:
+    per_tx  = Decimal(str(policy.get("per_transaction_limit_usd", 100)))
+    large   = Decimal(str(policy.get("large_payment_amount_usd", 1000)))
+    medium_w = int(policy.get("medium_threshold_bps", 5000))
+    large_w  = int(policy.get("large_threshold_bps", 7000))
+
+    if amount <= per_tx:
+        return ExecutionMode.AUTO_EXECUTE, 0
+    if amount >= large:
+        return ExecutionMode.MULTISIG_REQUIRED, large_w
+    return ExecutionMode.MULTISIG_REQUIRED, medium_w
+
+
+def _assess_risk(
+    recipient: str,
+    amount: Decimal,
+    category: str,
+    treasury_id: str,
+    db: TreasuryDB,
+) -> tuple[RiskLevel, list[str]]:
+    """Full risk assessment — new recipient, duplicate, amount, budget."""
+    from datetime import datetime, timedelta
+
+    concerns: list[str] = []
+    score = 0.0
+
+    # 1. New recipient?
+    txs = db.get_transactions(treasury_id, limit=500, direction="out")
+    known = {t["to_address"].lower() for t in txs if t.get("to_address")}
+    if recipient.lower() not in known:
+        concerns.append("New recipient — no prior payment history")
+        score += 0.3
+
+    # 2. Duplicate in last 7 days?
+    cutoff = (datetime.utcnow() - timedelta(days=7)).isoformat()
+    duplicates = [
+        t for t in txs
+        if t.get("to_address", "").lower() == recipient.lower()
+        and t.get("timestamp", "") >= cutoff
+        and Decimal(str(t.get("amount_usd") or 0)) == amount
+    ]
+    if duplicates:
+        concerns.append("Possible duplicate — same amount paid to this recipient in last 7 days")
+        score += 0.4
+
+    # 3. Amount deviation vs vendor history
+    vendor_txs = [t for t in txs if t.get("to_address", "").lower() == recipient.lower()]
+    if vendor_txs:
+        avg = sum(Decimal(str(t.get("amount_usd") or 0)) for t in vendor_txs) / len(vendor_txs)
+        if avg > 0:
+            deviation = float((amount - avg) / avg * 100)
+            if deviation > 100:
+                concerns.append(f"Amount is {deviation:.0f}% above this vendor's average")
+                score += 0.2
+
+    # 4. Large absolute amount
+    if amount > Decimal("5000"):
+        concerns.append(f"Large payment: ${amount:,.2f}")
+        score += 0.15
+    elif amount > Decimal("1000"):
+        score += 0.05
+
+    # 5. Budget overrun risk
+    try:
+        budgets = db.get_budgets(treasury_id, "current_month")
+        for b in budgets:
+            if b.get("category") == category:
+                new_util = (b.get("spent_usd", 0) + float(amount)) / b["amount_usd"] * 100
+                if new_util > 100:
+                    concerns.append(f"{category} budget would be {new_util:.0f}% utilized (over budget)")
+                    score += 0.2
+                elif new_util > 90:
+                    concerns.append(f"{category} budget would reach {new_util:.0f}%")
+                    score += 0.1
+    except Exception:
+        pass
+
+    if score >= 0.7:
+        return RiskLevel.CRITICAL, concerns
+    if score >= 0.4:
+        return RiskLevel.HIGH, concerns
+    if score >= 0.2:
+        return RiskLevel.MEDIUM, concerns
+    return RiskLevel.LOW, concerns
 
 
 @router.post("/payment", response_model=CreateProposalResponse)
@@ -30,18 +133,26 @@ async def create_payment_proposal(
     web3: Web3Service = Depends(get_web3_service),
     db: TreasuryDB = Depends(_get_db_service),
 ):
-    # 1. Token allowed?
+    # Validate treasury exists
+    treasury = db.get_treasury(request.treasury_id)
+    if not treasury:
+        raise HTTPException(404, f"Treasury {request.treasury_id} not found")
+
+    # Token allowed?
     token_upper = request.token.upper()
-    if token_upper not in web3.tokens and token_upper != "CELO":
+    if token_upper not in web3.tokens and token_upper not in ("CELO", "BOT"):
         raise HTTPException(400, f"Token {request.token} not allowed")
 
-    # 2. Execution mode
-    execution_mode, required_weight = _check_policy(request.amount)
+    # Load policy from DB (reflects onchain policy after governance changes it)
+    policy = _load_policy(request.treasury_id, db)
+    execution_mode, required_weight = _check_policy(request.amount, policy)
 
-    # 3. Risk assessment
-    risk_level, concerns = _assess_risk(request, db)
+    # Full risk assessment
+    risk_level, concerns = _assess_risk(
+        request.recipient, request.amount, request.category, request.treasury_id, db
+    )
 
-    # 4. Submit to blockchain via agent wallet
+    # Submit to blockchain via agent wallet
     try:
         result = web3.create_payment_proposal(
             token_symbol=token_upper,
@@ -50,29 +161,48 @@ async def create_payment_proposal(
             description=request.description,
         )
     except NotImplementedError:
-        # Fallback for local dev without a real RPC
         result = {"tx_hash": "0x" + "0" * 64, "proposal_id": 0}
 
     auto_executed = execution_mode == ExecutionMode.AUTO_EXECUTE
 
-    # 5. Persist to DB
+    # Persist proposal to DB (only if it requires multisig — AUTO_EXECUTE has no proposal)
+    db_proposal_id = None
     if not auto_executed and result.get("proposal_id"):
-        db.create_proposal({
-            "treasury_id": request.recipient,  # linked via treasury context (passed by agent)
+        row = db.create_proposal({
+            "treasury_id": request.treasury_id,          # ← FIXED: was request.recipient
             "proposal_id_onchain": result["proposal_id"],
             "type": "PAYMENT",
             "status": "PENDING",
+            "title": request.description[:80],
+            "description": request.description,
             "token": token_upper,
             "value": str(request.amount),
             "target": request.recipient,
-            "description": request.description,
             "required_weight": required_weight,
             "approved_weight": 0,
-            "operation_hash": "",
+            "created_by": None,   # agent wallet; frontend sets this if desired
         })
+        db_proposal_id = row["id"]
+
+    # Log the agent action for audit trail
+    db.log_agent_action(request.treasury_id, {
+        "action_type": "CREATE_PAYMENT_PROPOSAL",
+        "input": {
+            "token": token_upper,
+            "recipient": request.recipient,
+            "amount": str(request.amount),
+            "description": request.description,
+            "category": request.category,
+        },
+        "decision": "AUTO_EXECUTE" if auto_executed else f"MULTISIG_REQUIRED (weight={required_weight})",
+        "risk_score": {"LOW": 0.1, "MEDIUM": 0.35, "HIGH": 0.65, "CRITICAL": 0.9}.get(risk_level.value, 0.5),
+        "policy_result": execution_mode.value,
+        "proposal_id": db_proposal_id,
+        "executed": auto_executed,
+    })
 
     return CreateProposalResponse(
-        proposal_id=str(result.get("proposal_id")) if result.get("proposal_id") else None,
+        proposal_id=db_proposal_id,
         onchain_id=result.get("proposal_id"),
         execution_mode=execution_mode,
         required_weight=required_weight,
@@ -101,49 +231,83 @@ async def sign_proposal(
     web3: Web3Service = Depends(get_web3_service),
     db: TreasuryDB = Depends(_get_db_service),
 ):
-    """Record a member's approval signature."""
-    # 1. Verify proposal exists
+    """Record a member's approval after they have called governance.approve() onchain.
+
+    Flow:
+      1. Frontend calls governance.approve(onchain_id) via the user's wallet
+      2. Frontend (or indexer) then calls this endpoint to sync the weight to DB
+         so the UI updates immediately without waiting for the indexer
+    """
     proposal = db.get_proposal(proposal_id)
     if not proposal:
         raise HTTPException(404, "Proposal not found")
-    if proposal["status"] != "PENDING":
+    if proposal["status"] not in ("PENDING",):
         raise HTTPException(400, f"Proposal is {proposal['status']}, cannot sign")
 
-    # 2. Verify signer is active member onchain
-    member = web3.governance.functions.getMember(
-        web3.w3.to_checksum_address(request.signer)
-    ).call()
-    if not member[2]:  # active field
-        raise HTTPException(403, "Signer is not an active member")
+    signer_lower = request.signer.lower()
 
-    weight = member[1]
+    # Verify signer is an active member onchain
+    try:
+        member = web3.governance.functions.getMember(
+            web3.w3.to_checksum_address(request.signer)
+        ).call()
+        if not member[2]:  # active bool
+            raise HTTPException(403, "Signer is not an active member")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(503, f"Could not verify member onchain: {e}")
 
-    # 3. Get snapshot weight for this proposal
     onchain_id = proposal.get("proposal_id_onchain")
+
+    # Get snapshot weight for this proposal (what they were worth when proposal was created)
+    weight = member[1]  # current weight as fallback
     if onchain_id:
-        snapshot_weight = web3.get_snapshot_weight(onchain_id, request.signer)
-        if snapshot_weight == 0:
-            raise HTTPException(403, "Signer not in proposal snapshot")
-        weight = snapshot_weight
+        try:
+            snapshot = web3.get_snapshot_weight(onchain_id, request.signer)
+            if snapshot == 0:
+                raise HTTPException(403, "Signer has zero weight in this proposal's snapshot")
+            weight = snapshot
+        except HTTPException:
+            raise
+        except Exception:
+            pass  # RPC unavailable — use current weight as best-effort
 
-    # 4. Check not already signed
-    if web3.has_signed(onchain_id, request.signer):
-        raise HTTPException(400, "Already signed this proposal")
+        # Confirm they haven't already signed (onchain is authoritative)
+        try:
+            if web3.has_signed(onchain_id, request.signer):
+                # Check DB too — might just be a re-sync call
+                existing = [s for s in (proposal.get("proposal_signatures") or [])
+                            if s.get("signer", "").lower() == signer_lower]
+                if existing:
+                    return {"status": proposal["status"], "already_signed": True,
+                            "approved_weight": proposal["approved_weight"]}
+        except Exception:
+            pass
 
-    # 5. Record in DB (onchain approval is submitted by the frontend directly)
+    # Check not already recorded in DB
+    existing_sigs = proposal.get("proposal_signatures") or []
+    if any(s.get("signer", "").lower() == signer_lower for s in existing_sigs):
+        return {"status": proposal["status"], "already_signed": True,
+                "approved_weight": proposal["approved_weight"]}
+
+    # Record signature in DB
     db.add_signature(proposal_id, request.signer, weight, request.signature)
 
-    # 6. Check if threshold reached
-    proposal = db.get_proposal(proposal_id)
-    if proposal["approved_weight"] >= proposal["required_weight"]:
+    # Re-fetch to get updated approved_weight
+    updated = db.get_proposal(proposal_id)
+    new_weight = updated["approved_weight"]
+    required   = updated["required_weight"]
+
+    threshold_reached = new_weight >= required
+    if threshold_reached and updated["status"] == "PENDING":
         db.update_proposal_status(proposal_id, "APPROVED")
-        return {"status": "APPROVED", "threshold_reached": True, "approved_weight": proposal["approved_weight"]}
 
     return {
-        "status": "PENDING",
-        "threshold_reached": False,
-        "approved_weight": proposal["approved_weight"],
-        "required_weight": proposal["required_weight"],
+        "status": "APPROVED" if threshold_reached else "PENDING",
+        "threshold_reached": threshold_reached,
+        "approved_weight": new_weight,
+        "required_weight": required,
     }
 
 
@@ -153,16 +317,27 @@ async def execute_proposal(
     web3: Web3Service = Depends(get_web3_service),
     db: TreasuryDB = Depends(_get_db_service),
 ):
-    """Execute an approved proposal."""
+    """Execute an approved proposal onchain. Agent wallet submits the tx."""
     proposal = db.get_proposal(proposal_id)
     if not proposal:
         raise HTTPException(404, "Proposal not found")
     if proposal["status"] == "EXECUTED":
         raise HTTPException(400, "Already executed")
     if proposal["approved_weight"] < proposal["required_weight"]:
-        raise HTTPException(400, f"Threshold not met: {proposal['approved_weight']}/{proposal['required_weight']}")
+        raise HTTPException(
+            400,
+            f"Threshold not met: {proposal['approved_weight']}/{proposal['required_weight']} bps"
+        )
 
-    tx_hash = web3.execute_proposal(proposal["proposal_id_onchain"])
+    onchain_id = proposal.get("proposal_id_onchain")
+    if not onchain_id:
+        raise HTTPException(400, "No onchain proposal ID recorded — cannot execute")
+
+    try:
+        tx_hash = web3.execute_proposal(onchain_id)
+    except Exception as e:
+        raise HTTPException(500, f"Execution failed: {e}")
+
     db.update_proposal_status(proposal_id, "EXECUTED")
     return {"tx_hash": tx_hash, "status": "EXECUTED"}
 
@@ -175,30 +350,7 @@ async def cancel_proposal(
     proposal = db.get_proposal(proposal_id)
     if not proposal:
         raise HTTPException(404, "Proposal not found")
+    if proposal["status"] not in ("PENDING",):
+        raise HTTPException(400, f"Cannot cancel a {proposal['status']} proposal")
     db.update_proposal_status(proposal_id, "CANCELLED")
     return {"status": "CANCELLED"}
-
-
-# ─── Helpers ──────────────────────────────────────────────────────────────────
-
-def _check_policy(amount: Decimal) -> tuple[ExecutionMode, int]:
-    if amount <= PER_TX_LIMIT_USD:
-        return ExecutionMode.AUTO_EXECUTE, 0
-    if amount >= LARGE_AMOUNT_USD:
-        return ExecutionMode.MULTISIG_REQUIRED, LARGE_WEIGHT_BPS
-    return ExecutionMode.MULTISIG_REQUIRED, MEDIUM_WEIGHT_BPS
-
-
-def _assess_risk(request: CreatePaymentProposalRequest, db: TreasuryDB) -> tuple[RiskLevel, list[str]]:
-    concerns = []
-    score = 0.0
-    if request.amount > Decimal("5000"):
-        concerns.append("Large payment (>$5,000)")
-        score += 0.3
-    if request.amount > Decimal("1000"):
-        score += 0.1
-    if score >= 0.4:
-        return RiskLevel.HIGH, concerns
-    if score >= 0.2:
-        return RiskLevel.MEDIUM, concerns
-    return RiskLevel.LOW, concerns

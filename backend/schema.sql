@@ -173,3 +173,9 @@ CREATE INDEX idx_transactions_to_address   ON transactions(to_address);
 CREATE INDEX idx_proposals_treasury_status ON proposals(treasury_id, status);
 CREATE INDEX idx_agent_actions_treasury_ts ON agent_actions(treasury_id, created_at DESC);
 CREATE INDEX idx_members_treasury          ON members(treasury_id);
+
+-- ─── Factory integration (add to treasuries table) ───────────────────────────
+-- Run these ALTER statements if you already have the table:
+ALTER TABLE treasuries ADD COLUMN IF NOT EXISTS governance_address TEXT;
+ALTER TABLE treasuries ADD COLUMN IF NOT EXISTS policy_address TEXT;
+ALTER TABLE treasuries ADD COLUMN IF NOT EXISTS factory_address TEXT;
