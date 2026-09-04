@@ -1,5 +1,5 @@
 allowBuilds:
-  '@reown/appkit': set this to true or false
-  bufferutil: set this to true or false
-  protobufjs: set this to true or false
-  utf-8-validate: set this to true or false
+  '@reown/appkit': true
+  bufferutil: true
+  protobufjs: true
+  utf-8-validate: true
