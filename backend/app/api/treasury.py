@@ -158,7 +158,7 @@ async def get_analytics(
         for b in raw
     )
 
-    runway = float(total_usd / avg_burn) if avg_burn > 0 else None
+    runway = float(total_usd / avg_burn) if avg_burn > 0 else 999.0
 
     return SpendingAnalyticsResponse(
         monthly_burn_usd=avg_burn,
@@ -193,12 +193,12 @@ async def forecast_runway(
 
     effective_treasury = total_usd - one_time_payment
     effective_burn = avg_burn + additional_monthly_burn
-    runway_months = float(effective_treasury / effective_burn) if effective_burn > 0 else float("inf")
+    runway_months = float(effective_treasury / effective_burn) if effective_burn > 0 else 999.0
     runway_date = datetime.utcnow() + timedelta(days=runway_months * 30)
 
     scenario = None
     if additional_monthly_burn > 0 or one_time_payment > 0:
-        base = float(total_usd / avg_burn) if avg_burn > 0 else float("inf")
+        base = float(total_usd / avg_burn) if avg_burn > 0 else 999.0
         scenario = {
             "base_runway_months": round(base, 1),
             "scenario_runway_months": round(runway_months, 1),
