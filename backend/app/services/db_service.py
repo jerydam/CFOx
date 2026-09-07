@@ -270,18 +270,31 @@ class TreasuryDB:
         return r.data[0]
 
     def get_or_create_org(self, founder_address: str, name: str) -> dict:
+        founder_address = founder_address.lower()
         r = (self.db.table("organizations")
              .select("*")
-             .eq("created_by", founder_address.lower())
+             .eq("created_by", founder_address)
              .limit(1)
              .execute())
         if r.data:
             return r.data[0]
-        slug = name.lower().replace(" ", "-")[:40]
+
+        base_slug = name.lower().replace(" ", "-")[:40] or "org"
+        slug = f"{base_slug}-{founder_address[2:8]}"  # disambiguate with wallet suffix
+
+        existing_slug = (self.db.table("organizations")
+                          .select("*")
+                          .eq("slug", slug)
+                          .limit(1)
+                          .execute())
+        if existing_slug.data:
+            # Extremely unlikely double-collision — fall back to full address
+            slug = f"{base_slug}-{founder_address[2:]}"
+
         r2 = self.db.table("organizations").insert({
             "name": name,
             "slug": slug,
-            "created_by": founder_address.lower(),
+            "created_by": founder_address,
         }).execute()
         return r2.data[0]
 # ── Paste these methods inside the TreasuryDB class in db_service.py ──────────
