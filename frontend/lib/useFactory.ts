@@ -16,7 +16,7 @@ const FACTORY_ABI = [
     stateMutability: 'nonpayable',
     inputs: [
       { name: 'founderName',  type: 'string' },
-      { name: 'usdcAddress',  type: 'address' },
+      { name: 'USDTAddress',  type: 'address' },
       { name: 'perTxLimit',   type: 'uint256' },
       { name: 'dailyLimit',   type: 'uint256' },
       { name: 'weeklyLimit',  type: 'uint256' },
@@ -54,9 +54,9 @@ function getFactoryAddress(): `0x${string}` {
   return addr as `0x${string}`
 }
 
-function getUsdcAddress(): `0x${string}` {
-  const addr = process.env.NEXT_PUBLIC_USDC_ADDRESS
-  if (!addr?.startsWith('0x')) throw new Error('NEXT_PUBLIC_USDC_ADDRESS not set')
+function getUSDTAddress(): `0x${string}` {
+  const addr = process.env.NEXT_PUBLIC_USDT_ADDRESS
+  if (!addr?.startsWith('0x')) throw new Error('NEXT_PUBLIC_USDT_ADDRESS not set')
   return addr as `0x${string}`
 }
 
@@ -116,7 +116,7 @@ export function useFactory() {
         functionName: 'deploy',
         args: [
           params.founderName || 'Founder',
-          getUsdcAddress(),
+          getUSDTAddress(),
           perTxRaw,
           dailyRaw,
           weeklyRaw,

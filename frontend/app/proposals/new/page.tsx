@@ -9,14 +9,14 @@ import Icon from '@/components/Icon'
 import { proposals as proposalsApi, money, type CreateProposalResponse, type ExecutionMode, type RiskLevel } from '@/lib/api'
 import { useTreasuryId } from '@/lib/treasury-context'
 
-const TOKENS = ['USDC', 'USDT', 'CELO']
+const TOKENS = ['USDT', 'USDT', 'BOT']
 const CATEGORIES = ['Infrastructure', 'Software', 'API', 'Payroll', 'Grants', 'Yield', 'Other']
 
 export default function NewProposalPage() {
   const router = useRouter()
   const treasuryId = useTreasuryId()
   const [form, setForm] = useState({
-    token:       'USDC',
+    token:       'USDT',
     recipient:   '',
     amount:      '',
     description: '',

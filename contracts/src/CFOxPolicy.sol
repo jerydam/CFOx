@@ -52,7 +52,7 @@ contract CFOxPolicy is ICFOxPolicy {
             weeklyLimit: weeklyLimit,
             mediumPaymentThreshold: 5_000,  // 50% — medium payments
             largePaymentThreshold: 7_000,   // 70% — large payments
-            largePaymentAmount: 1_000e6,    // $1,000 USDC (6 decimals) triggers large
+            largePaymentAmount: 1_000e6,    // $1,000 USDT (6 decimals) triggers large
             recipientWhitelistEnabled: false
         });
 

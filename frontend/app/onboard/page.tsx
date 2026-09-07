@@ -259,7 +259,7 @@ export default function OnboardPage() {
 
               <div style={{ borderTop: '1px solid var(--border)', paddingTop: 18 }}>
                 <p style={{ fontSize: 12, fontWeight: 600, marginBottom: 12, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  AI spending limits (USDC)
+                  AI spending limits (USDT)
                 </p>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
                   <FieldGroup label="Per-tx" hint="Max auto-execute">
@@ -347,7 +347,7 @@ export default function OnboardPage() {
                   <span style={{ color: 'var(--text-muted)', width: 90 }}>{label}</span>
                   <code style={{ fontFamily: 'monospace', fontSize: 12 }}>{addr}</code>
                   <a
-                    href={`https://celo-sepolia.blockscout.com/address/${addr}`}
+                    href={`https://BOT-sepolia.blockscout.com/address/${addr}`}
                     target="_blank" rel="noreferrer"
                     style={{ fontSize: 11, color: 'var(--accent)' }}
                   >↗</a>
@@ -371,7 +371,7 @@ export default function OnboardPage() {
               </button>
               {result.tx_hash && (
                 <a
-                  href={`https://celo-sepolia.blockscout.com/tx/${result.tx_hash}`}
+                  href={`https://BOT-sepolia.blockscout.com/tx/${result.tx_hash}`}
                   target="_blank" rel="noreferrer"
                   className="ghost-button"
                   style={{ flex: 1, justifyContent: 'center', textDecoration: 'none', textAlign: 'center' }}

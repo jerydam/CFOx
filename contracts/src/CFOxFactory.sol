@@ -74,13 +74,13 @@ contract CFOxFactory {
     /// @notice Deploy a full CFOx suite for the caller.
     ///         Caller pays their own gas — no ETH needs to be sent here.
     /// @param founderName  Display name stored on the governance contract.
-    /// @param usdcAddress  Initial ERC20 token to whitelist in the treasury.
-    /// @param perTxLimit   Max amount auto-executed without multisig (6-decimal USDC).
+    /// @param USDTAddress  Initial ERC20 token to whitelist in the treasury.
+    /// @param perTxLimit   Max amount auto-executed without multisig (6-decimal USDT).
     /// @param dailyLimit   Daily autonomous spend cap.
     /// @param weeklyLimit  Weekly autonomous spend cap.
     function deploy(
         string calldata founderName,
-        address usdcAddress,
+        address USDTAddress,
         uint256 perTxLimit,
         uint256 dailyLimit,
         uint256 weeklyLimit
@@ -89,7 +89,7 @@ contract CFOxFactory {
             instances[msg.sender].governance == address(0),
             "CFOxFactory: already deployed"
         );
-        require(usdcAddress != address(0), "CFOxFactory: zero token");
+        require(USDTAddress != address(0), "CFOxFactory: zero token");
 
         // 1. Governance — founder is msg.sender; aiWallet is the agent
         CFOxGovernance gov = new CFOxGovernance(
@@ -113,7 +113,7 @@ contract CFOxFactory {
         gov.initialize(address(treas), address(pol));
 
         // 5. Whitelist the initial token (one-shot, factory-only)
-        treas.setupAllowedToken(usdcAddress);
+        treas.setupAllowedToken(USDTAddress);
 
         // 6. Store
         instances[msg.sender] = CFOxInstance({

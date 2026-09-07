@@ -11,7 +11,7 @@ TOOLS = [
     {
         "name": "get_treasury_balance",
         "description": (
-            "Get current treasury balances for all tokens (USDC, native token, etc.) "
+            "Get current treasury balances for all tokens (USDT, native token, etc.) "
             "and the total USD value. Always call this before any financial recommendation."
         ),
         "input_schema": {
@@ -128,7 +128,7 @@ TOOLS = [
                 "treasury_id": {"type": "string"},
                 "token": {
                     "type": "string",
-                    "description": "Token symbol, e.g. 'USDC', 'CELO', 'ETH'"
+                    "description": "Token symbol, e.g. 'USDT', 'BOT', 'ETH'"
                 },
                 "recipient_address": {
                     "type": "string",
@@ -136,7 +136,7 @@ TOOLS = [
                 },
                 "amount": {
                     "type": "number",
-                    "description": "Amount in human-readable units (e.g. 500 for $500 USDC)"
+                    "description": "Amount in human-readable units (e.g. 500 for $500 USDT)"
                 },
                 "description": {
                     "type": "string",

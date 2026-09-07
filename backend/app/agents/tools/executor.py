@@ -55,7 +55,7 @@ class AgentToolExecutor:
         raw = self.web3.get_all_balances()
         balances = []
         total_usd = Decimal("0")
-        PRICES = {"USDC": 1.0, "USDT": 1.0}
+        PRICES = {"USDT": 1.0, "USDT": 1.0}
         for b in raw:
             human = Decimal(str(b["raw_balance"])) / Decimal(10 ** b["decimals"])
             price = PRICES.get(b["symbol"], 0.0)
@@ -135,7 +135,7 @@ class AgentToolExecutor:
         monthly = self.db.get_monthly_burn(self.treasury_id, 3)
         avg_burn = Decimal(str(sum(m["amount_usd"] for m in monthly) / max(len(monthly), 1)))
         raw = self.web3.get_all_balances()
-        PRICES = {"USDC": 1.0, "USDT": 1.0}
+        PRICES = {"USDT": 1.0, "USDT": 1.0}
         total_usd = sum(
             Decimal(str(b["raw_balance"])) / Decimal(10 ** b["decimals"])
             * Decimal(str(PRICES.get(b["symbol"], 0)))

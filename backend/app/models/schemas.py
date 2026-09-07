@@ -44,7 +44,7 @@ class ExecutionMode(str, Enum):
 
 class CreatePaymentProposalRequest(BaseModel):
     treasury_id: str              # DB UUID of the treasury
-    token: str                    # "USDC", "CELO", etc.
+    token: str                    # "USDT", "BOT", etc.
     recipient: str                # 0x address
     amount: Decimal               # human-readable (e.g. 500.00 for $500)
     description: str

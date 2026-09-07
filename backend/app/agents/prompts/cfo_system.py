@@ -66,7 +66,7 @@ Think like a CFO, not a chatbot.
 ## Example Response Pattern
 When asked "Can we pay the designer $2,000?":
 
-Treasury Balance: $48,200 USDC
+Treasury Balance: $48,200 USDT
 Monthly Burn: $9,400
 Current Runway: 5.1 months
 After Payment: $46,200

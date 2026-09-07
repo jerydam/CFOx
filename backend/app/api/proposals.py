@@ -140,7 +140,7 @@ async def create_payment_proposal(
 
     # Token allowed?
     token_upper = request.token.upper()
-    if token_upper not in web3.tokens and token_upper not in ("CELO", "BOT"):
+    if token_upper not in web3.tokens and token_upper not in ("BOT", "BOT"):
         raise HTTPException(400, f"Token {request.token} not allowed")
 
     # Load policy from DB (reflects onchain policy after governance changes it)

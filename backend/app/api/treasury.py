@@ -15,7 +15,7 @@ from ..services.db_service import TreasuryDB, get_db
 
 router = APIRouter()
 
-TOKEN_USD_PRICE: dict[str, float] = {"USDC": 1.0, "USDT": 1.0}
+TOKEN_USD_PRICE: dict[str, float] = {"USDT": 1.0, "USDT": 1.0}
 
 
 def _get_db_service() -> TreasuryDB:

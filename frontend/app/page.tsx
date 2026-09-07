@@ -117,7 +117,7 @@ export default function LandingPage() {
           <Feature
             icon="wallet"
             title="Multi-Token Treasury"
-            body="Hold CELO, USDC, cUSD, and more. Balances update in real time with USD valuations from on-chain price feeds."
+            body="Hold BOT, USDT, cUSD, and more. Balances update in real time with USD valuations from on-chain price feeds."
           />
           <Feature
             icon="file"
@@ -171,7 +171,7 @@ export default function LandingPage() {
             <span className="brand-mark"><span /></span>
             <span className="brand-name">CFOx</span>
           </div>
-          <span className="landing-footer-copy">© 2026 CFOx. Built on Celo.</span>
+          <span className="landing-footer-copy">© 2026 CFOx. Built on BOT.</span>
         </div>
       </footer>
     </div>

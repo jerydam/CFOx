@@ -108,7 +108,7 @@ npm run dev
 
 1. **Create treasury** — founder gets 100% equity
 2. **Add team** — founder proposes equity transfers to CFO (20%) and CTO (10%)
-3. **Deposit USDC** — send USDC to treasury address
+3. **Deposit USDT** — send USDT to treasury address
 4. **Ask AI** — *"How much can we safely spend this month?"*
 5. **Pay vendor** — *"Pay our designer $500"* → AI creates proposal → equity holders sign → executes
 6. **Verify** — *"Why did we make that payment?"* → AI retrieves full audit trail

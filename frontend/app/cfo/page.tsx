@@ -21,7 +21,7 @@ const SUGGESTED = [
   'What is our current runway?',
   'Show me the top spending categories this month.',
   'Are there any unusual transactions I should review?',
-  'Propose paying 500 USDC to 0x1234… for infrastructure.',
+  'Propose paying 500 USDT to 0x1234… for infrastructure.',
 ]
 
 // Read subscriptionFee from factory so the UI always shows the current price
@@ -207,7 +207,7 @@ export default function CFOChatPage() {
                 disabled={paying}
                 onClick={handleSubscribe}
               >
-                {paying ? 'Signing…' : `Subscribe · ${feeEth} CELO / 28 days (~$5)`}
+                {paying ? 'Signing…' : `Subscribe · ${feeEth} BOT / 28 days (~$5)`}
               </button>
             )}
           </section>
@@ -230,7 +230,7 @@ export default function CFOChatPage() {
               disabled={paying}
               onClick={handleSubscribe}
             >
-              {paying ? 'Waiting for signature…' : `Pay ${feeEth} CELO to subscribe (~$5 / 28 days)`}
+              {paying ? 'Waiting for signature…' : `Pay ${feeEth} BOT to subscribe (~$5 / 28 days)`}
             </button>
           </section>
         )}
@@ -328,7 +328,7 @@ export default function CFOChatPage() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKey}
-                placeholder="Ask your CFO anything, or say 'pay 200 USDC to 0x…'"
+                placeholder="Ask your CFO anything, or say 'pay 200 USDT to 0x…'"
                 rows={2}
                 disabled={busy}
                 style={{

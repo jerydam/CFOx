@@ -119,7 +119,7 @@ export default function DocsPage() {
               equity holders for a vote.
             </p>
             <Callout type="info">
-              CFOx is currently deployed on <strong>Celo Testnet</strong>
+              CFOx is currently deployed on <strong>BOT Testnet</strong>
             </Callout>
           </section>
 
@@ -143,7 +143,7 @@ export default function DocsPage() {
               <Step n={2} title="Fill in your organization details">
                 On the onboard screen, enter your name, your organization name, and
                 the three AI spending limits (per-transaction, daily cap, weekly
-                cap). These are denominated in USDC and encoded directly into your
+                cap). These are denominated in USDT and encoded directly into your
                 Policy contract — they can be changed later via a governance
                 proposal.
               </Step>
@@ -151,10 +151,10 @@ export default function DocsPage() {
                 Hit <strong>Deploy contracts</strong>. A single transaction deploys
                 all three contracts in sequence: Governance → Treasury → Policy →
                 cross-wired initialization. The whole process takes 5–15 seconds on
-                Celo.
+                BOT.
               </Step>
               <Step n={4} title="Fund your treasury">
-                Send CELO, USDC, or cUSD to your newly deployed Treasury address
+                Send BOT, USDT, or cUSD to your newly deployed Treasury address
                 (shown on the success screen). The on-chain indexer picks up
                 incoming transactions within one block and surfaces them in your
                 dashboard.
@@ -222,7 +222,7 @@ export default function DocsPage() {
             <p className="docs-p">
               Every founder gets their <strong>own Treasury contract</strong>,
               deployed fresh by the Factory — it is never shared with any other
-              organization. It accepts any ERC-20 token or native CELO and
+              organization. It accepts any ERC-20 token or native BOT and
               maintains on-chain balances. All outbound transfers are gated —
               nothing leaves without either a passing governance vote or a valid
               Policy-compliant AI agent call.
@@ -259,8 +259,8 @@ export default function DocsPage() {
             <p className="docs-p">
               Any ERC-20 token can be held. However, USD-denominated analytics
               (burn rate, runway) only cover tokens for which a price feed is
-              registered on the Policy contract. Out of the box this includes CELO,
-              USDC, and cUSD.
+              registered on the Policy contract. Out of the box this includes BOT,
+              USDT, and cUSD.
             </p>
           </section>
 
@@ -369,9 +369,9 @@ export default function DocsPage() {
               Policy contract checks three limits simultaneously:
             </p>
             <PropTable rows={[
-              ['Per-transaction limit', 'Maximum USDC value of a single AI-initiated payment. Payments above this always go to a governance vote, regardless of daily/weekly headroom.'],
-              ['Daily cap',   'Total USDC the AI agent can spend in a given UTC calendar day. Resets at UTC midnight.'],
-              ['Weekly cap',  'Total USDC the AI agent can spend in a given 7-day epoch window (not calendar-aligned to a particular weekday).'],
+              ['Per-transaction limit', 'Maximum USDT value of a single AI-initiated payment. Payments above this always go to a governance vote, regardless of daily/weekly headroom.'],
+              ['Daily cap',   'Total USDT the AI agent can spend in a given UTC calendar day. Resets at UTC midnight.'],
+              ['Weekly cap',  'Total USDT the AI agent can spend in a given 7-day epoch window (not calendar-aligned to a particular weekday).'],
             ]} />
             <p className="docs-p">
               If any limit would be breached, the AI's payment request doesn't
@@ -432,7 +432,7 @@ export default function DocsPage() {
               instruction in natural language. Examples:
             </p>
             <CodeBlock>{`"What's our current runway at this burn rate?"
-"Pay 500 USDC to 0xABC... for the Figma subscription."
+"Pay 500 USDT to 0xABC... for the Figma subscription."
 "Show me the top 3 spending categories this month."
 "Draft a proposal to add Alice (0xDEF...) as a member with 15% equity."`}</CodeBlock>
             <p className="docs-p">
@@ -562,7 +562,7 @@ export default function DocsPage() {
             </p>
             <h3 className="docs-h3">How indexing works</h3>
             <p className="docs-p">
-              A background worker polls the chain every block (~5 seconds on Celo).
+              A background worker polls the chain every block (~5 seconds on BOT).
               It reads logs from your Treasury contract, maps them to transaction
               records, resolves USD values using the Policy price feed, and writes
               the results to Supabase. There is a short lag between a transaction
@@ -628,7 +628,7 @@ export default function DocsPage() {
             <Eyebrow>Network</Eyebrow>
             <h2 className="docs-h2">Supported chains</h2>
             <PropTable rows={[
-              ['Celo Testnet ',   'Primary production chain. Low fees, EVM-compatible, strong stablecoin support (USDC, cUSD).'],
+              ['BOT Testnet ',   'Primary production chain. Low fees, EVM-compatible, strong stablecoin support (USDT, cUSD).'],
               
             ]} />
             {/* <h3 className="docs-h3">Adding Botchain to MetaMask</h3>
@@ -665,7 +665,7 @@ Explorer:      https://explorer.bohr.life`}</CodeBlock> */}
             <h3 className="docs-h3">Key risks to be aware of</h3>
             <ul className="docs-ul">
               <li>The backend's <strong>agent private key</strong> controls both the AI's spending authority and the wallet that receives subscription fees. Keep it in a secrets manager, not a plain <Code>.env</Code> file in production.</li>
-              <li>Smart contracts on Celo Testnet are <strong>not audited</strong> and should never hold real funds.</li>
+              <li>Smart contracts on BOT Testnet are <strong>not audited</strong> and should never hold real funds.</li>
               <li>The Policy limits are your first line of defence against a compromised agent. Set them conservatively.</li>
               <li>There is currently no time-lock on governance proposals. A proposal can be executed immediately once its threshold is met. For high-value treasuries, consider adding a delay policy.</li>
               <li><strong>Unpausing has no wired proposal path yet</strong> — <Code>Treasury.unpause()</Code> exists and is governance-gated, but no <Code>create*Proposal</Code> function currently targets it (see the Treasury section above). Don't rely on pausing as a reversible safety switch until that's shipped.</li>
@@ -702,14 +702,14 @@ Explorer:      https://explorer.bohr.life`}</CodeBlock> */}
 
             <FAQ q="How are USD values calculated?">
               Token USD prices are fetched from on-chain price feeds registered on
-              the Policy contract. For CELO, USDC, and cUSD, these are Chainlink
-              feeds bridged to Celo. Custom tokens without a registered feed show a
+              the Policy contract. For BOT, USDT, and cUSD, these are Chainlink
+              feeds bridged to BOT. Custom tokens without a registered feed show a
               balance of zero USD in the analytics.
             </FAQ>
 
             <FAQ q="Is there a fee to use CFOx?">
               CFOx itself charges no protocol fee on governance or treasury
-              actions — you only pay on-chain gas for those (very low on Celo,
+              actions — you only pay on-chain gas for those (very low on BOT,
               typically under $0.01 per transaction). The one paid feature is the
               AI CFO Chat: you get 5 free calls every 28 days, after which
               continuing to chat costs $5 per 28-day period, paid on-chain via{' '}

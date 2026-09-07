@@ -304,7 +304,7 @@ class TreasuryDB:
 
     def get_subscription(self, treasury_id: str) -> dict | None:
         try:
-            r = (self.db.table("subscriptions")
+            r = (self.db.table("treasury_subscriptions")
                  .select("*")
                  .eq("treasury_id", treasury_id)
                  .single()
@@ -315,7 +315,7 @@ class TreasuryDB:
 
     def create_subscription(self, treasury_id: str) -> dict:
         from datetime import datetime, timezone
-        r = self.db.table("subscriptions").insert({
+        r = self.db.table("treasury_subscriptions").insert({
             "treasury_id": treasury_id,
             "free_calls_used": 0,
             "period_start": datetime.now(timezone.utc).isoformat(),
@@ -325,11 +325,11 @@ class TreasuryDB:
 
     def reset_subscription_period(self, treasury_id: str) -> dict:
         from datetime import datetime, timezone
-        r = (self.db.table("subscriptions")
+        r = (self.db.table("treasury_subscriptions")
              .update({
                  "free_calls_used": 0,
                  "period_start": datetime.now(timezone.utc).isoformat(),
-                 "is_subscribed": False,   # subscription must be renewed each period
+                 "is_subscribed": False,
                  "updated_at": datetime.now(timezone.utc).isoformat(),
              })
              .eq("treasury_id", treasury_id)
@@ -338,11 +338,9 @@ class TreasuryDB:
 
     def increment_free_calls(self, treasury_id: str) -> dict:
         from datetime import datetime, timezone
-        # Read current count then write (Supabase JS SDK doesn't support atomic increment
-        # via the Python client directly — use RPC or a simple read+write here)
         sub = self.get_subscription(treasury_id)
         new_count = (sub["free_calls_used"] if sub else 0) + 1
-        r = (self.db.table("subscriptions")
+        r = (self.db.table("treasury_subscriptions")
              .update({
                  "free_calls_used": new_count,
                  "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -355,7 +353,7 @@ class TreasuryDB:
         self, treasury_id: str, tx_hash: str, paid_at
     ) -> dict:
         from datetime import datetime, timezone
-        r = (self.db.table("subscriptions")
+        r = (self.db.table("treasury_subscriptions")
              .update({
                  "is_subscribed": True,
                  "subscribed_at": paid_at.isoformat() if hasattr(paid_at, "isoformat") else str(paid_at),
@@ -368,6 +366,7 @@ class TreasuryDB:
              .eq("treasury_id", treasury_id)
              .execute())
         return r.data[0]
+    
     def create_treasury(
         self, org_id: str, address: str, chain_id: int, name: str,
         governance_address: str = None, policy_address: str = None,

@@ -9,7 +9,7 @@ interface ICFOxPolicy {
     }
 
     struct SpendingPolicy {
-        uint256 perTransactionLimit;  // in token decimals (e.g. USDC 6 decimals)
+        uint256 perTransactionLimit;  // in token decimals (e.g. USDT 6 decimals)
         uint256 dailyLimit;
         uint256 weeklyLimit;
         uint256 mediumPaymentThreshold;  // basis points required for medium payments

@@ -7,7 +7,7 @@
  */
 
 import { http, createConfig } from 'wagmi'
-import { celo, celoAlfajores } from 'wagmi/chains'
+import { BOT, BOTAlfajores } from 'wagmi/chains'
 import { injected, walletConnect } from 'wagmi/connectors'
 
 // Botchain (chain ID 968) — add to the chain list once wagmi supports it,
@@ -29,7 +29,7 @@ export const botchain = defineChain({
 const wcProjectId = process.env.NEXT_PUBLIC_WC_PROJECT_ID || ''
 
 export const wagmiConfig = createConfig({
-  chains: [botchain, celo, celoAlfajores],
+  chains: [botchain, BOT, BOTAlfajores],
   connectors: [
     injected(),
     ...(wcProjectId
@@ -38,8 +38,8 @@ export const wagmiConfig = createConfig({
   ],
   transports: {
     [botchain.id]: http(),
-    [celo.id]: http(),
-    [celoAlfajores.id]: http(),
+    [BOT.id]: http(),
+    [BOTAlfajores.id]: http(),
   },
 })
 

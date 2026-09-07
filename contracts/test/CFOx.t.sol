@@ -7,10 +7,10 @@ import "../src/CFOxTreasury.sol";
 import "../src/CFOxPolicy.sol";
 import "../src/CFOxFactory.sol";
 
-contract MockUSDC {
+contract MockUSDT {
     mapping(address => uint256) public balanceOf;
     string public name    = "USD Coin";
-    string public symbol  = "USDC";
+    string public symbol  = "USDT";
     uint8  public decimals = 6;
 
     function mint(address to, uint256 amount) external {
@@ -30,7 +30,7 @@ contract CFOxTest is Test {
     CFOxTreasury   public treas;
     CFOxPolicy     public pol;
     CFOxFactory    public factory;
-    MockUSDC       public usdc;
+    MockUSDT       public USDT;
 
     address founder  = address(0xF0);
     address cfo      = address(0xCF);
@@ -44,21 +44,21 @@ contract CFOxTest is Test {
     uint256 constant WEEKLY  = 2_000e6;
 
     function setUp() public {
-        usdc    = new MockUSDC();
+        USDT    = new MockUSDT();
         // ✅ Fix 1: factory now requires (aiWallet, subscriptionFee)
         factory = new CFOxFactory(agent, 2.5 ether);
 
         vm.prank(founder);
         // ✅ Fix 2: deploy() no longer takes agent inline
         (address g, address t, address p) = factory.deploy(
-            "Founder", address(usdc), PER_TX, DAILY, WEEKLY
+            "Founder", address(USDT), PER_TX, DAILY, WEEKLY
         );
 
         gov   = CFOxGovernance(g);
         treas = CFOxTreasury(payable(t));
         pol   = CFOxPolicy(p);
 
-        usdc.mint(address(treas), 100_000e6);
+        USDT.mint(address(treas), 100_000e6);
     }
 
     function test_FounderHas100Percent() public view {
@@ -72,7 +72,7 @@ contract CFOxTest is Test {
     }
 
     function test_TreasuryBalance() public view {
-        assertEq(treas.balanceOf(address(usdc)), 100_000e6);
+        assertEq(treas.balanceOf(address(USDT)), 100_000e6);
     }
 
     function test_FactoryRecordsInstance() public view {
@@ -88,55 +88,55 @@ contract CFOxTest is Test {
         vm.prank(founder);
         vm.expectRevert("CFOxFactory: already deployed");
         // ✅ Fix 3: same deploy() signature
-        factory.deploy("Founder2", address(usdc), PER_TX, DAILY, WEEKLY);
+        factory.deploy("Founder2", address(USDT), PER_TX, DAILY, WEEKLY);
     }
 
     function test_TwoFoundersGetSeparateInstances() public {
         address founder2 = address(0xF2);
         vm.prank(founder2);
         (address g2, address t2,) = factory.deploy(
-            "Founder2", address(usdc), PER_TX, DAILY, WEEKLY
+            "Founder2", address(USDT), PER_TX, DAILY, WEEKLY
         );
         assertTrue(g2 != address(gov));
         assertTrue(t2 != address(treas));
         assertEq(factory.totalDeployed(), 2);
     }
 
-    function test_USDCWhitelistedByFactory() public view {
-        assertTrue(treas.isTokenAllowed(address(usdc)));
+    function test_USDTWhitelistedByFactory() public view {
+        assertTrue(treas.isTokenAllowed(address(USDT)));
         assertTrue(treas.tokenSetupDone());
     }
 
     function test_SetupAllowedTokenCannotBeCalledAgain() public {
         vm.expectRevert("Not allowed");
-        treas.setupAllowedToken(address(usdc));
+        treas.setupAllowedToken(address(USDT));
     }
 
     function test_SmallPaymentAutoExecutes() public {
-        uint256 vendorBefore = usdc.balanceOf(vendor);
+        uint256 vendorBefore = USDT.balanceOf(vendor);
         vm.prank(agent);
-        uint256 proposalId = gov.createPaymentProposal(address(usdc), vendor, 50e6, "Small vendor payment");
+        uint256 proposalId = gov.createPaymentProposal(address(USDT), vendor, 50e6, "Small vendor payment");
         assertEq(proposalId, 0);
-        assertEq(usdc.balanceOf(vendor), vendorBefore + 50e6);
+        assertEq(USDT.balanceOf(vendor), vendorBefore + 50e6);
     }
 
     function test_SmallPaymentRespectsDailyLimit() public {
         vm.startPrank(agent);
-        gov.createPaymentProposal(address(usdc), vendor, 100e6, "p1");
-        gov.createPaymentProposal(address(usdc), vendor, 100e6, "p2");
-        gov.createPaymentProposal(address(usdc), vendor, 100e6, "p3");
-        gov.createPaymentProposal(address(usdc), vendor, 100e6, "p4");
-        gov.createPaymentProposal(address(usdc), vendor, 100e6, "p5");
+        gov.createPaymentProposal(address(USDT), vendor, 100e6, "p1");
+        gov.createPaymentProposal(address(USDT), vendor, 100e6, "p2");
+        gov.createPaymentProposal(address(USDT), vendor, 100e6, "p3");
+        gov.createPaymentProposal(address(USDT), vendor, 100e6, "p4");
+        gov.createPaymentProposal(address(USDT), vendor, 100e6, "p5");
         vm.stopPrank();
 
         vm.prank(agent);
-        uint256 proposalId = gov.createPaymentProposal(address(usdc), vendor, 50e6, "over daily");
+        uint256 proposalId = gov.createPaymentProposal(address(USDT), vendor, 50e6, "over daily");
         assertTrue(proposalId > 0, "Should require multisig after daily limit");
     }
 
     function test_MediumPaymentCreatesProposal() public {
         vm.prank(founder);
-        uint256 proposalId = gov.createPaymentProposal(address(usdc), vendor, 500e6, "Marketing");
+        uint256 proposalId = gov.createPaymentProposal(address(USDT), vendor, 500e6, "Marketing");
         assertTrue(proposalId > 0);
         ICFOxGovernance.Proposal memory p = gov.getProposal(proposalId);
         assertEq(p.requiredWeight, 5_000);
@@ -145,20 +145,20 @@ contract CFOxTest is Test {
 
     function test_FounderAloneCanApproveAndExecute() public {
         vm.prank(agent);
-        uint256 pid = gov.createPaymentProposal(address(usdc), vendor, 500e6, "Pay designer");
+        uint256 pid = gov.createPaymentProposal(address(USDT), vendor, 500e6, "Pay designer");
 
         vm.prank(founder);
         gov.approve(pid);
 
-        uint256 vendorBefore = usdc.balanceOf(vendor);
+        uint256 vendorBefore = USDT.balanceOf(vendor);
         gov.execute(pid);
-        assertEq(usdc.balanceOf(vendor), vendorBefore + 500e6);
+        assertEq(USDT.balanceOf(vendor), vendorBefore + 500e6);
         assertTrue(gov.getProposal(pid).executed);
     }
 
     function test_CannotExecuteTwice() public {
         vm.prank(agent);
-        uint256 pid = gov.createPaymentProposal(address(usdc), vendor, 200e6, "x");
+        uint256 pid = gov.createPaymentProposal(address(USDT), vendor, 200e6, "x");
         vm.prank(founder);
         gov.approve(pid);
         gov.execute(pid);
@@ -168,7 +168,7 @@ contract CFOxTest is Test {
 
     function test_CannotSignTwice() public {
         vm.prank(agent);
-        uint256 pid = gov.createPaymentProposal(address(usdc), vendor, 200e6, "x");
+        uint256 pid = gov.createPaymentProposal(address(USDT), vendor, 200e6, "x");
         vm.startPrank(founder);
         gov.approve(pid);
         vm.expectRevert(abi.encodeWithSelector(ICFOxGovernance.AlreadySigned.selector, pid, founder));
@@ -178,7 +178,7 @@ contract CFOxTest is Test {
 
     function test_NonMemberCannotSign() public {
         vm.prank(agent);
-        uint256 pid = gov.createPaymentProposal(address(usdc), vendor, 200e6, "x");
+        uint256 pid = gov.createPaymentProposal(address(USDT), vendor, 200e6, "x");
         vm.prank(attacker);
         vm.expectRevert(ICFOxGovernance.NotMember.selector);
         gov.approve(pid);
@@ -186,21 +186,21 @@ contract CFOxTest is Test {
 
     function test_SnapshotIsolatesWeightChanges() public {
         vm.prank(agent);
-        uint256 pid = gov.createPaymentProposal(address(usdc), vendor, 500e6, "test");
+        uint256 pid = gov.createPaymentProposal(address(USDT), vendor, 500e6, "test");
         assertEq(gov.getSnapshotWeight(pid, founder), 10_000);
         assertEq(gov.getSnapshotWeight(pid, founder), 10_000);
     }
 
     function test_ExecutionFailsIfThresholdNotMet() public {
         vm.prank(agent);
-        uint256 pid = gov.createPaymentProposal(address(usdc), vendor, 500e6, "x");
+        uint256 pid = gov.createPaymentProposal(address(USDT), vendor, 500e6, "x");
         vm.expectRevert(abi.encodeWithSelector(ICFOxGovernance.ThresholdNotReached.selector, 5_000, 0));
         gov.execute(pid);
     }
 
     function test_ExpiredProposalCannotBeExecuted() public {
         vm.prank(agent);
-        uint256 pid = gov.createPaymentProposal(address(usdc), vendor, 500e6, "x");
+        uint256 pid = gov.createPaymentProposal(address(USDT), vendor, 500e6, "x");
         vm.prank(founder);
         gov.approve(pid);
         vm.warp(block.timestamp + 8 days);
@@ -214,7 +214,7 @@ contract CFOxTest is Test {
         assertTrue(treas.isPaused());
         vm.prank(address(gov));
         vm.expectRevert(ICFOxTreasury.TreasuryPaused.selector);
-        treas.execute(address(usdc), vendor, 100e6);
+        treas.execute(address(USDT), vendor, 100e6);
     }
 
     function test_UnpauseRestoresPayments() public {
@@ -242,7 +242,7 @@ contract CFOxTest is Test {
     function test_AttackerCannotCallTreasuryDirectly() public {
         vm.prank(attacker);
         vm.expectRevert(ICFOxTreasury.NotGovernance.selector);
-        treas.execute(address(usdc), attacker, 100_000e6);
+        treas.execute(address(USDT), attacker, 100_000e6);
     }
 
     function test_EquityTransferProposalFlow() public {
@@ -262,7 +262,7 @@ contract CFOxTest is Test {
 
     function test_ProposerCanCancelProposal() public {
         vm.prank(agent);
-        uint256 pid = gov.createPaymentProposal(address(usdc), vendor, 500e6, "x");
+        uint256 pid = gov.createPaymentProposal(address(USDT), vendor, 500e6, "x");
         vm.prank(agent);
         gov.cancel(pid);
         assertTrue(gov.getProposal(pid).cancelled);
@@ -270,7 +270,7 @@ contract CFOxTest is Test {
 
     function test_CancelledProposalCannotBeExecuted() public {
         vm.prank(agent);
-        uint256 pid = gov.createPaymentProposal(address(usdc), vendor, 500e6, "x");
+        uint256 pid = gov.createPaymentProposal(address(USDT), vendor, 500e6, "x");
         vm.prank(founder);
         gov.approve(pid);
         vm.prank(agent);
@@ -281,11 +281,11 @@ contract CFOxTest is Test {
 
     function test_OperationHashIncludesChainId() public {
         vm.prank(agent);
-        uint256 pid = gov.createPaymentProposal(address(usdc), vendor, 500e6, "x");
+        uint256 pid = gov.createPaymentProposal(address(USDT), vendor, 500e6, "x");
         ICFOxGovernance.Proposal memory p = gov.getProposal(pid);
         bytes32 expectedHash = keccak256(abi.encode(
             block.chainid, address(treas), pid,
-            abi.encode(address(usdc), vendor, uint256(500e6))
+            abi.encode(address(USDT), vendor, uint256(500e6))
         ));
         assertEq(p.operationHash, expectedHash);
     }

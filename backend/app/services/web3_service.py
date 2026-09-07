@@ -145,7 +145,7 @@ FACTORY_ABI = json.loads("""[
    "inputs":[
      {"name":"founderName","type":"string"},
      {"name":"agentWallet","type":"address"},
-     {"name":"usdcAddress","type":"address"},
+     {"name":"USDTAddress","type":"address"},
      {"name":"perTxLimit","type":"uint256"},
      {"name":"dailyLimit","type":"uint256"},
      {"name":"weeklyLimit","type":"uint256"}
@@ -227,12 +227,12 @@ class Web3Service:
 
     def _load_token_registry(self) -> dict:
         registry = {}
-        usdc = os.getenv("USDC_ADDRESS")
-        if usdc:
-            registry["USDC"] = {"address": Web3.to_checksum_address(usdc), "decimals": 6}
-        weth = os.getenv("WETH_ADDRESS")
-        if weth:
-            registry["WETH"] = {"address": Web3.to_checksum_address(weth), "decimals": 18}
+        USDT = os.getenv("USDT_ADDRESS")
+        if USDT:
+            registry["USDT"] = {"address": Web3.to_checksum_address(USDT), "decimals": 6}
+        WBOT = os.getenv("WBOT_ADDRESS")
+        if WBOT:
+            registry["WBOT"] = {"address": Web3.to_checksum_address(WBOT), "decimals": 18}
         return registry
 
     def _get_gas_price(self) -> int:
@@ -275,7 +275,7 @@ class Web3Service:
         self,
         founder_address: str,
         founder_name: str,
-        usdc_address: str,
+        USDT_address: str,
         per_tx_limit: int,
         daily_limit: int,
         weekly_limit: int,
@@ -287,7 +287,7 @@ class Web3Service:
         tx = self.factory.functions.deploy(
             founder_name,
             self.agent_account.address,
-            Web3.to_checksum_address(usdc_address),
+            Web3.to_checksum_address(USDT_address),
             per_tx_limit,
             daily_limit,
             weekly_limit,
@@ -372,7 +372,7 @@ class TreasuryWeb3:
         balances = []
         native_bal = self.get_native_balance()
         balances.append({
-            "symbol": "CELO",
+            "symbol": "BOT",
             "address": "0x0000000000000000000000000000000000000000",
             "raw_balance": native_bal,
             "decimals": 18,

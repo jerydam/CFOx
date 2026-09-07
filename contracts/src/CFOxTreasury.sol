@@ -19,7 +19,7 @@ contract CFOxTreasury is ICFOxTreasury {
     /// @notice True once setupAllowedToken() has been called by the factory.
     bool public tokenSetupDone;
 
-    /// @dev address(0) represents the native token (ETH/CELO/etc)
+    /// @dev address(0) represents the native token (ETH/BOT/etc)
     mapping(address => bool) private _allowedTokens;
 
     // ─── Modifiers ────────────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ contract CFOxTreasury is ICFOxTreasury {
     }
 
     /// @notice Add or remove an allowed token via governance proposal.
-    ///         Use this after initial deploy to whitelist additional tokens (e.g. WETH, cUSD).
+    ///         Use this after initial deploy to whitelist additional tokens (e.g. WBOT, cUSD).
     function setAllowedToken(address token, bool allowed) external override onlyGovernance {
         _allowedTokens[token] = allowed;
         emit AllowedTokenSet(token, allowed);

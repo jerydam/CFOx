@@ -16,19 +16,19 @@ import "../src/CFOxFactory.sol";
 ///           AGENT_ADDRESS         — AI wallet that receives subscription fees
 ///                                   and creates governance proposals (set in
 ///                                   env once, never supplied by users)
-///           SUBSCRIPTION_FEE_WEI  — fee in native wei (~$5 worth of CELO at
+///           SUBSCRIPTION_FEE_WEI  — fee in native wei (~$5 worth of BOT at
 ///                                   deploy time), e.g. 2500000000000000000
-///                                   = 2.5 CELO
+///                                   = 2.5 BOT
 ///
 ///         Optional env vars (smoke-test only — see below):
-///           USDC_ADDRESS      — if set, also runs a one-off test deploy()
+///           USDT_ADDRESS      — if set, also runs a one-off test deploy()
 ///                               using this script's own broadcaster as the
 ///                               founder, to sanity-check the whole flow
 ///                               end-to-end on a testnet. Omit in prod.
 ///           FOUNDER_NAME      — "Founder"        (smoke-test only)
-///           PER_TX_LIMIT      — 100_000_000      ($100 USDC, 6 decimals)
-///           DAILY_LIMIT       — 500_000_000      ($500 USDC)
-///           WEEKLY_LIMIT      — 2_000_000_000    ($2,000 USDC)
+///           PER_TX_LIMIT      — 100_000_000      ($100 USDT, 6 decimals)
+///           DAILY_LIMIT       — 500_000_000      ($500 USDT)
+///           WEEKLY_LIMIT      — 2_000_000_000    ($2,000 USDT)
 ///
 ///         Users pay all their own gas. The AI wallet is funded via
 ///         paySubscription(), not by this script.
@@ -36,7 +36,7 @@ contract Deploy is Script {
     function run() external {
         // ── Env ───────────────────────────────────────────────────────────────
         address agentWallet     = vm.envAddress("AGENT_ADDRESS");
-        uint256 subscriptionFee = vm.envOr("SUBSCRIPTION_FEE_WEI", uint256(2.5 ether)); // ~$5 at $2/CELO
+        uint256 subscriptionFee = vm.envOr("SUBSCRIPTION_FEE_WEI", uint256(2.5 ether)); // ~$5 at $2/BOT
 
         // ── Deploy factory ──────────────────────────────────────────────────────
         vm.startBroadcast();
@@ -49,11 +49,11 @@ contract Deploy is Script {
         console.log("Subscription fee: ", subscriptionFee);
 
         // ── Optional smoke test ──────────────────────────────────────────────
-        // Only runs if USDC_ADDRESS is set. Calls factory.deploy() using this
+        // Only runs if USDT_ADDRESS is set. Calls factory.deploy() using this
         // same broadcaster as the founder — fine for a throwaway testnet key,
         // never intended for a real founder's mainnet deploy.
-        address usdcAddress = vm.envOr("USDC_ADDRESS", address(0));
-        if (usdcAddress != address(0)) {
+        address USDTAddress = vm.envOr("USDT_ADDRESS", address(0));
+        if (USDTAddress != address(0)) {
             string memory founderName = vm.envOr("FOUNDER_NAME", string("Founder"));
             uint256 perTxLimit  = vm.envOr("PER_TX_LIMIT",  uint256(100e6));    // $100
             uint256 dailyLimit  = vm.envOr("DAILY_LIMIT",   uint256(500e6));    // $500
@@ -61,7 +61,7 @@ contract Deploy is Script {
 
             (address governance, address treasury, address policy) = factory.deploy(
                 founderName,
-                usdcAddress,
+                USDTAddress,
                 perTxLimit,
                 dailyLimit,
                 weeklyLimit
