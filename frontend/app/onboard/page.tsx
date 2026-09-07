@@ -346,7 +346,7 @@ export default function OnboardPage() {
                 }}>
                   <span style={{ color: 'var(--text-muted)', width: 90 }}>{label}</span>
                   <code style={{ fontFamily: 'monospace', fontSize: 12 }}>{addr}</code>
-                  
+                  <a
                     href={`https://celo-sepolia.blockscout.com/address/${addr}`}
                     target="_blank" rel="noreferrer"
                     style={{ fontSize: 11, color: 'var(--accent)' }}
@@ -370,7 +370,7 @@ export default function OnboardPage() {
                 Go to dashboard <Icon name="arrow" size={15} />
               </button>
               {result.tx_hash && (
-                
+                <a
                   href={`https://celo-sepolia.blockscout.com/tx/${result.tx_hash}`}
                   target="_blank" rel="noreferrer"
                   className="ghost-button"
