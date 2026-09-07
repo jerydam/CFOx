@@ -62,7 +62,7 @@ export default function OnboardPage() {
             policyAddress:     inst.policy_address!,
           })
         }
-      } catch (_e)
+      } catch (_e){}
       finally { setCheckingExisting(false) }
     })()
   }, [isConnected, address, step])
