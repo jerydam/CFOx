@@ -40,7 +40,7 @@ class TreasuryDB:
     # ─── Members ─────────────────────────────────────────────────────────────
 
     def get_members(self, treasury_id: str) -> list[dict]:
-        r = (self.db.table("members")
+        r = (self.db.table("team_members")
              .select("*")
              .eq("treasury_id", treasury_id)
              .order("equity_weight", desc=True)
@@ -48,7 +48,7 @@ class TreasuryDB:
         return r.data
 
     def upsert_member(self, treasury_id: str, address: str, data: dict) -> dict:
-        r = (self.db.table("members")
+        r = (self.db.table("team_members")
              .upsert({
                  "treasury_id": treasury_id,
                  "wallet_address": address.lower(),

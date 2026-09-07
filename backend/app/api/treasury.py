@@ -158,7 +158,7 @@ async def get_analytics(
         for b in raw
     )
 
-    runway = float(total_usd / avg_burn) if avg_burn > 0 else float("inf")
+    runway = float(total_usd / avg_burn) if avg_burn > 0 else None
 
     return SpendingAnalyticsResponse(
         monthly_burn_usd=avg_burn,

@@ -53,9 +53,9 @@ class BlockchainIndexer:
         self.w3 = Web3(Web3.HTTPProvider(rpc_url))
         self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 
-        self.treasury_id = treasury_id
-        self.governance_address = os.getenv("GOVERNANCE_CONTRACT", "").lower()
-        self.treasury_address   = os.getenv("TREASURY_CONTRACT", "").lower()
+        treasury_row = self.db.get_treasury(treasury_id)
+        self.governance_address = treasury_row["governance_address"].lower()
+        self.treasury_address   = treasury_row["address"].lower()
 
         self.db = TreasuryDB(get_db())
 
