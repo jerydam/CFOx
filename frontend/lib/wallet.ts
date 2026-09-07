@@ -10,19 +10,19 @@ import { http, createConfig } from 'wagmi'
 import { celo, celoAlfajores } from 'wagmi/chains'
 import { injected, walletConnect } from 'wagmi/connectors'
 
-// Botchain (chain ID 677) — add to the chain list once wagmi supports it,
+// Botchain (chain ID 968) — add to the chain list once wagmi supports it,
 // or define it manually:
 import { defineChain } from 'viem'
 
 export const botchain = defineChain({
-  id: 677,
+  id: 968,
   name: 'BOT Chain',
   nativeCurrency: { name: 'BOT', symbol: 'BOT', decimals: 18 },
   rpcUrls: {
-    default: { http: [process.env.NEXT_PUBLIC_RPC_URL || 'https://rpc.botchain.network'] },
+    default: { http: [process.env.NEXT_PUBLIC_RPC_URL || 'https://rpc.bohr.life'] },
   },
   blockExplorers: {
-    default: { name: 'Blockscout', url: 'https://explorer.botchain.network' },
+    default: { name: 'Blockscout', url: 'https://scan.bohr.life' },
   },
 })
 

@@ -49,7 +49,7 @@ SIG_TO_NAME = {v: k for k, v in EVENTS.items()}
 
 class BlockchainIndexer:
     def __init__(self, treasury_id: str):
-        rpc_url = os.getenv("RPC_URL", "https://forno.celo.org")
+        rpc_url = os.getenv("RPC_URL", "https://rpc.bohr.life")
         self.w3 = Web3(Web3.HTTPProvider(rpc_url))
         self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 
@@ -171,7 +171,7 @@ class BlockchainIndexer:
             from web3.middleware import ExtraDataToPOAMiddleware
             import os, json
             from ..services.web3_service import GOVERNANCE_ABI
-            w3 = Web3(Web3.HTTPProvider(os.getenv("RPC_URL", "https://forno.celo.org")))
+            w3 = Web3(Web3.HTTPProvider(os.getenv("RPC_URL", "https://rpc.bohr.life")))
             w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
             gov = w3.eth.contract(
                 address=Web3.to_checksum_address(self.governance_address),

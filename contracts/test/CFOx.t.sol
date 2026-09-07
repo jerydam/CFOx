@@ -45,11 +45,13 @@ contract CFOxTest is Test {
 
     function setUp() public {
         usdc    = new MockUSDC();
-        factory = new CFOxFactory();
+        // ✅ Fix 1: factory now requires (aiWallet, subscriptionFee)
+        factory = new CFOxFactory(agent, 2.5 ether);
 
         vm.prank(founder);
+        // ✅ Fix 2: deploy() no longer takes agent inline
         (address g, address t, address p) = factory.deploy(
-            "Founder", agent, address(usdc), PER_TX, DAILY, WEEKLY
+            "Founder", address(usdc), PER_TX, DAILY, WEEKLY
         );
 
         gov   = CFOxGovernance(g);
@@ -82,17 +84,18 @@ contract CFOxTest is Test {
         assertEq(factory.totalDeployed(), 1);
     }
 
-    function test_CannotDeployTwice() public {
+     function test_CannotDeployTwice() public {
         vm.prank(founder);
         vm.expectRevert("CFOxFactory: already deployed");
-        factory.deploy("Founder2", agent, address(usdc), PER_TX, DAILY, WEEKLY);
+        // ✅ Fix 3: same deploy() signature
+        factory.deploy("Founder2", address(usdc), PER_TX, DAILY, WEEKLY);
     }
 
     function test_TwoFoundersGetSeparateInstances() public {
         address founder2 = address(0xF2);
         vm.prank(founder2);
         (address g2, address t2,) = factory.deploy(
-            "Founder2", agent, address(usdc), PER_TX, DAILY, WEEKLY
+            "Founder2", address(usdc), PER_TX, DAILY, WEEKLY
         );
         assertTrue(g2 != address(gov));
         assertTrue(t2 != address(treas));
