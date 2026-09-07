@@ -1,13 +1,6 @@
+// frontend/lib/useFactory.ts
 /**
  * useFactory — wagmi hook for deploying a CFOx suite from the user's wallet.
- *
- * The factory's deploy() takes msg.sender as the founder, so the tx MUST be
- * signed by the user's wallet — not the backend agent.  This hook handles the
- * on-chain call; the backend is only contacted afterward to register the
- * resulting addresses in the DB.
- *
- * The agentWallet is now set in the factory constructor (from deployer env) —
- * founders no longer need to supply it.
  */
 
 import { useWriteContract, usePublicClient } from 'wagmi'
@@ -72,9 +65,9 @@ function getUsdcAddress(): `0x${string}` {
 export interface DeployParams {
   founderName: string
   orgName: string
-  perTxLimit: number    // USD, e.g. 100
-  dailyLimit: number    // USD, e.g. 500
-  weeklyLimit: number   // USD, e.g. 2000
+  perTxLimit: number
+  dailyLimit: number
+  weeklyLimit: number
 }
 
 export interface DeployResult {
@@ -82,7 +75,19 @@ export interface DeployResult {
   governanceAddress: string
   treasuryAddress: string
   policyAddress: string
-  treasuryId: string    // DB UUID returned by backend registration
+  treasuryId: string
+}
+
+export interface RegisterParams {
+  founderAddress: string
+  founderName: string
+  orgName: string
+  governanceAddress: string
+  treasuryAddress: string
+  policyAddress: string
+  perTxLimit: number
+  dailyLimit: number
+  weeklyLimit: number
 }
 
 // ─── Hook ────────────────────────────────────────────────────────────────────
@@ -93,15 +98,6 @@ export function useFactory() {
   const [isPending, setIsPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  /**
-   * Deploy a full CFOx suite.
-   *
-   * Flow:
-   *   1. User's wallet signs and sends factory.deploy(...)  ← msg.sender = founder
-   *   2. We parse the CFOxDeployed event from the receipt
-   *   3. POST /api/factory/register — backend records addresses in DB
-   *   4. Return all addresses + DB treasury_id to caller
-   */
   async function deployInstance(
     params: DeployParams,
     founderAddress: string,
@@ -110,12 +106,10 @@ export function useFactory() {
     setError(null)
 
     try {
-      // USDC is 6 decimals
       const perTxRaw  = parseUnits(String(params.perTxLimit),  6)
       const dailyRaw  = parseUnits(String(params.dailyLimit),  6)
       const weeklyRaw = parseUnits(String(params.weeklyLimit), 6)
 
-      // 1. Send tx from user wallet (agentWallet is set in factory constructor)
       const txHash = await writeContractAsync({
         address: getFactoryAddress(),
         abi: FACTORY_ABI,
@@ -129,7 +123,6 @@ export function useFactory() {
         ],
       })
 
-      // 2. Wait for receipt and parse event
       if (!publicClient) throw new Error('No public client available')
       const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
 
@@ -158,38 +151,48 @@ export function useFactory() {
         throw new Error('CFOxDeployed event not found in receipt')
       }
 
-      // 3. Register in backend DB
-      const BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-      const res = await fetch(`${BASE}/api/factory/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tx_hash:             txHash,
-          founder_address:     founderAddress,
-          founder_name:        params.founderName || 'Founder',
-          org_name:            params.orgName || 'My Organization',
-          governance_address:  governanceAddress,
-          treasury_address:    treasuryAddress,
-          policy_address:      policyAddress,
-          per_tx_limit:        params.perTxLimit,
-          daily_limit:         params.dailyLimit,
-          weekly_limit:        params.weeklyLimit,
-        }),
-      })
-
-      if (!res.ok) {
-        const detail = await res.text().catch(() => res.statusText)
-        throw new Error(`Registration failed: ${detail}`)
-      }
-
-      const { treasury_id } = await res.json()
-
-      return {
-        txHash,
+      const { treasury_id } = await _callRegister({
+        founderAddress,
+        founderName:        params.founderName || 'Founder',
+        orgName:            params.orgName || 'My Organization',
         governanceAddress,
         treasuryAddress,
         policyAddress,
-        treasuryId: treasury_id,
+        perTxLimit:  params.perTxLimit,
+        dailyLimit:  params.dailyLimit,
+        weeklyLimit: params.weeklyLimit,
+        txHash,
+      })
+
+      return { txHash, governanceAddress, treasuryAddress, policyAddress, treasuryId: treasury_id }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setError(msg)
+      throw e
+    } finally {
+      setIsPending(false)
+    }
+  }
+
+  /**
+   * Register an already-deployed instance in the backend DB.
+   * Use when the on-chain deploy succeeded but backend registration failed
+   * (treasury_id is null despite contracts being live).
+   */
+  async function registerInstance(params: RegisterParams): Promise<DeployResult> {
+    setIsPending(true)
+    setError(null)
+    try {
+      const { treasury_id } = await _callRegister({
+        ...params,
+        txHash: '',   // no new tx — contracts already on-chain
+      })
+      return {
+        txHash: '',
+        governanceAddress: params.governanceAddress,
+        treasuryAddress:   params.treasuryAddress,
+        policyAddress:     params.policyAddress,
+        treasuryId:        treasury_id,
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -200,5 +203,43 @@ export function useFactory() {
     }
   }
 
-  return { deployInstance, isPending, error }
+  return { deployInstance, registerInstance, isPending, error }
+}
+
+// ─── Internal helper ──────────────────────────────────────────────────────────
+
+async function _callRegister(body: {
+  txHash: string
+  founderAddress: string
+  founderName: string
+  orgName: string
+  governanceAddress: string
+  treasuryAddress: string
+  policyAddress: string
+  perTxLimit: number
+  dailyLimit: number
+  weeklyLimit: number
+}): Promise<{ treasury_id: string }> {
+  const BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+  const res = await fetch(`${BASE}/api/factory/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tx_hash:             body.txHash,
+      founder_address:     body.founderAddress,
+      founder_name:        body.founderName,
+      org_name:            body.orgName,
+      governance_address:  body.governanceAddress,
+      treasury_address:    body.treasuryAddress,
+      policy_address:      body.policyAddress,
+      per_tx_limit:        body.perTxLimit,
+      daily_limit:         body.dailyLimit,
+      weekly_limit:        body.weeklyLimit,
+    }),
+  })
+  if (!res.ok) {
+    const detail = await res.text().catch(() => res.statusText)
+    throw new Error(`Registration failed: ${detail}`)
+  }
+  return res.json()
 }

@@ -16,22 +16,26 @@ export default function OnboardPage() {
   const { address, isConnected } = useAccount()
   const { connect, connectors } = useConnect()
   const setTreasuryId = useSetTreasuryId()
-  const { deployInstance, isPending } = useFactory()
+  const { deployInstance, registerInstance, isPending } = useFactory()
 
   const [step, setStep]             = useState<Step>('connect')
   const [existingInstance, setExistingInstance] = useState<DeployResponse | null>(null)
+  // contracts are on-chain but treasury_id never saved to DB
+  const [unregisteredInstance, setUnregisteredInstance] = useState<{
+    governanceAddress: string
+    treasuryAddress: string
+    policyAddress: string
+  } | null>(null)
   const [checkingExisting, setCheckingExisting] = useState(false)
   const [result, setResult]         = useState<DeployResponse | null>(null)
   const [error, setError]           = useState<string | null>(null)
 
-  // Form fields
   const [founderName, setFounderName]   = useState('')
   const [orgName, setOrgName]           = useState('')
   const [perTxLimit, setPerTxLimit]     = useState('100')
   const [dailyLimit, setDailyLimit]     = useState('500')
   const [weeklyLimit, setWeeklyLimit]   = useState('2000')
 
-  // Move to configure once wallet connected; check for existing instance
   useEffect(() => {
     if (!isConnected || !address) return
     if (step === 'connect') setStep('configure')
@@ -41,13 +45,21 @@ export default function OnboardPage() {
       try {
         const inst = await factory.getInstance(address)
         if (inst.has_instance && inst.treasury_id) {
+          // fully registered — offer "use existing"
           setExistingInstance({
             tx_hash: '',
             factory_address: process.env.NEXT_PUBLIC_FACTORY_CONTRACT || '',
             governance_address: inst.governance_address!,
-            treasury_address: inst.treasury_address!,
-            policy_address: inst.policy_address!,
-            treasury_id: inst.treasury_id,
+            treasury_address:   inst.treasury_address!,
+            policy_address:     inst.policy_address!,
+            treasury_id:        inst.treasury_id,
+          })
+        } else if (inst.has_instance && !inst.treasury_id) {
+          // on-chain deploy succeeded but registration failed — offer "Register Treasury"
+          setUnregisteredInstance({
+            governanceAddress: inst.governance_address!,
+            treasuryAddress:   inst.treasury_address!,
+            policyAddress:     inst.policy_address!,
           })
         }
       } catch { /* factory may not be reachable yet */ }
@@ -60,8 +72,6 @@ export default function OnboardPage() {
     setError(null)
     setStep('deploying')
     try {
-      // The user's wallet signs this tx — msg.sender = founder.
-      // The backend is only called afterward to register addresses in the DB.
       const deployed = await deployInstance(
         {
           founderName: founderName || 'Founder',
@@ -75,6 +85,41 @@ export default function OnboardPage() {
 
       const res: DeployResponse = {
         tx_hash:             deployed.txHash,
+        factory_address:     process.env.NEXT_PUBLIC_FACTORY_CONTRACT || '',
+        governance_address:  deployed.governanceAddress,
+        treasury_address:    deployed.treasuryAddress,
+        policy_address:      deployed.policyAddress,
+        treasury_id:         deployed.treasuryId,
+      }
+
+      setResult(res)
+      setTreasuryId(res.treasury_id)
+      setStep('done')
+    } catch (e) {
+      setError(String(e))
+      setStep('configure')
+    }
+  }
+
+  async function handleRegister() {
+    if (!address || !unregisteredInstance) return
+    setError(null)
+    setStep('deploying')
+    try {
+      const deployed = await registerInstance({
+        founderAddress:    address,
+        founderName:       founderName || 'Founder',
+        orgName:           orgName || 'My Organization',
+        governanceAddress: unregisteredInstance.governanceAddress,
+        treasuryAddress:   unregisteredInstance.treasuryAddress,
+        policyAddress:     unregisteredInstance.policyAddress,
+        perTxLimit:  Number(perTxLimit),
+        dailyLimit:  Number(dailyLimit),
+        weeklyLimit: Number(weeklyLimit),
+      })
+
+      const res: DeployResponse = {
+        tx_hash:             '',
         factory_address:     process.env.NEXT_PUBLIC_FACTORY_CONTRACT || '',
         governance_address:  deployed.governanceAddress,
         treasury_address:    deployed.treasuryAddress,
@@ -116,7 +161,6 @@ export default function OnboardPage() {
 
       <div style={{ maxWidth: 560, margin: '0 auto' }}>
 
-        {/* ── Step: Connect wallet ── */}
         {step === 'connect' && (
           <section className="card" style={{ padding: 32, textAlign: 'center' }}>
             <div style={{ fontSize: 40, marginBottom: 16 }}>🔗</div>
@@ -139,7 +183,6 @@ export default function OnboardPage() {
           </section>
         )}
 
-        {/* ── Step: Configure ── */}
         {step === 'configure' && (
           <section className="card" style={{ padding: 32 }}>
             {checkingExisting && (
@@ -148,6 +191,8 @@ export default function OnboardPage() {
                 <div>Checking for existing instance…</div>
               </div>
             )}
+
+            {/* Fully deployed + registered */}
             {existingInstance && (
               <div className="notice" style={{ marginBottom: 20, background: 'var(--accent-light)' }}>
                 <div className="notice-icon"><Icon name="shield" size={17} /></div>
@@ -160,6 +205,22 @@ export default function OnboardPage() {
                 <button className="primary-button" style={{ fontSize: 12, padding: '6px 14px' }} onClick={handleUseExisting}>
                   Use it →
                 </button>
+              </div>
+            )}
+
+            {/* On-chain but not registered in DB */}
+            {unregisteredInstance && (
+              <div className="notice" style={{ marginBottom: 20, background: '#fff8e6', border: '1px solid #f0c040' }}>
+                <div className="notice-icon"><Icon name="zap" size={17} /></div>
+                <div>
+                  <strong>Contracts already deployed</strong>
+                  <p style={{ fontSize: 12, marginTop: 2, color: 'var(--text-muted)' }}>
+                    Your contracts are live but weren't registered. Fill in your name &amp; org below, then click Register Treasury — no new transaction needed.
+                  </p>
+                  <p style={{ fontSize: 12, marginTop: 4 }}>
+                    Treasury: <code>{shortAddr(unregisteredInstance.treasuryAddress)}</code>
+                  </p>
+                </div>
               </div>
             )}
 
@@ -221,26 +282,39 @@ export default function OnboardPage() {
 
               {error && <div className="form-error">{error}</div>}
 
-              <button
-                className="primary-button"
-                style={{ width: '100%', justifyContent: 'center', marginTop: 8 }}
-                onClick={handleDeploy}
-                disabled={!address || isPending}
-              >
-                <Icon name="zap" size={16} />
-                Deploy contracts
-              </button>
+              {unregisteredInstance ? (
+                <button
+                  className="primary-button"
+                  style={{ width: '100%', justifyContent: 'center', marginTop: 8 }}
+                  onClick={handleRegister}
+                  disabled={!address || isPending}
+                >
+                  <Icon name="zap" size={16} />
+                  Register Treasury
+                </button>
+              ) : (
+                <button
+                  className="primary-button"
+                  style={{ width: '100%', justifyContent: 'center', marginTop: 8 }}
+                  onClick={handleDeploy}
+                  disabled={!address || isPending || !!existingInstance}
+                >
+                  <Icon name="zap" size={16} />
+                  Deploy contracts
+                </button>
+              )}
             </div>
           </section>
         )}
 
-        {/* ── Step: Deploying ── */}
         {step === 'deploying' && (
           <section className="card" style={{ padding: 40, textAlign: 'center' }}>
             <div style={{ fontSize: 40, marginBottom: 16 }}>⏳</div>
-            <h2>Deploying your CFO suite…</h2>
+            <h2>{unregisteredInstance ? 'Registering your treasury…' : 'Deploying your CFO suite…'}</h2>
             <p style={{ color: 'var(--text-muted)', marginTop: 8, fontSize: 14 }}>
-              Confirm the transaction in your wallet, then wait ~5–15 seconds.
+              {unregisteredInstance
+                ? 'Connecting your on-chain contracts to the dashboard…'
+                : 'Confirm the transaction in your wallet, then wait ~5–15 seconds.'}
             </p>
             <div className="loading-state" style={{ marginTop: 24 }}>
               Governance → Treasury → Policy → Initializing…
@@ -248,7 +322,6 @@ export default function OnboardPage() {
           </section>
         )}
 
-        {/* ── Step: Done ── */}
         {step === 'done' && result && (
           <section className="card" style={{ padding: 32 }}>
             <div style={{ textAlign: 'center', marginBottom: 28 }}>
@@ -273,7 +346,7 @@ export default function OnboardPage() {
                 }}>
                   <span style={{ color: 'var(--text-muted)', width: 90 }}>{label}</span>
                   <code style={{ fontFamily: 'monospace', fontSize: 12 }}>{addr}</code>
-                  <a
+                  
                     href={`https://celo-sepolia.blockscout.com/address/${addr}`}
                     target="_blank" rel="noreferrer"
                     style={{ fontSize: 11, color: 'var(--accent)' }}
@@ -296,14 +369,16 @@ export default function OnboardPage() {
               <button className="primary-button" style={{ flex: 1, justifyContent: 'center' }} onClick={handleUseDashboard}>
                 Go to dashboard <Icon name="arrow" size={15} />
               </button>
-              <a
-                href={`https://celo-sepolia.blockscout.com/tx/${result.tx_hash}`}
-                target="_blank" rel="noreferrer"
-                className="ghost-button"
-                style={{ flex: 1, justifyContent: 'center', textDecoration: 'none', textAlign: 'center' }}
-              >
-                View tx ↗
-              </a>
+              {result.tx_hash && (
+                
+                  href={`https://celo-sepolia.blockscout.com/tx/${result.tx_hash}`}
+                  target="_blank" rel="noreferrer"
+                  className="ghost-button"
+                  style={{ flex: 1, justifyContent: 'center', textDecoration: 'none', textAlign: 'center' }}
+                >
+                  View tx ↗
+                </a>
+              )}
             </div>
           </section>
         )}
