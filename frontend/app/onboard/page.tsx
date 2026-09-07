@@ -62,7 +62,7 @@ export default function OnboardPage() {
             policyAddress:     inst.policy_address!,
           })
         }
-      } catch { /* factory may not be reachable yet */ }
+      } catch (_e)
       finally { setCheckingExisting(false) }
     })()
   }, [isConnected, address, step])
