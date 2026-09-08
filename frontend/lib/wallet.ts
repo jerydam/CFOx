@@ -7,29 +7,29 @@
  */
 
 import { http, createConfig } from 'wagmi'
-import { BOT, BOTAlfajores } from 'wagmi/chains'
+import { celo, celoAlfajores } from 'wagmi/chains'
 import { injected, walletConnect } from 'wagmi/connectors'
 
-// Botchain (chain ID 968) — add to the chain list once wagmi supports it,
+// Botchain (chain ID 677) — add to the chain list once wagmi supports it,
 // or define it manually:
 import { defineChain } from 'viem'
 
 export const botchain = defineChain({
-  id: 968,
+  id: 677,
   name: 'BOT Chain',
   nativeCurrency: { name: 'BOT', symbol: 'BOT', decimals: 18 },
   rpcUrls: {
-    default: { http: [process.env.NEXT_PUBLIC_RPC_URL || 'https://rpc.bohr.life'] },
+    default: { http: [process.env.NEXT_PUBLIC_RPC_URL || 'https://rpc.botchain.ai'] },
   },
   blockExplorers: {
-    default: { name: 'Blockscout', url: 'https://scan.bohr.life' },
+    default: { name: 'Blockscout', url: 'https://scan.botchain.ai' },
   },
 })
 
 const wcProjectId = process.env.NEXT_PUBLIC_WC_PROJECT_ID || ''
 
 export const wagmiConfig = createConfig({
-  chains: [botchain, BOT, BOTAlfajores],
+  chains: [botchain, celo, celoAlfajores],
   connectors: [
     injected(),
     ...(wcProjectId
@@ -38,8 +38,8 @@ export const wagmiConfig = createConfig({
   ],
   transports: {
     [botchain.id]: http(),
-    [BOT.id]: http(),
-    [BOTAlfajores.id]: http(),
+    [celo.id]: http(),
+    [celoAlfajores.id]: http(),
   },
 })
 

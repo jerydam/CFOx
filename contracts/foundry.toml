@@ -12,10 +12,10 @@ verbosity = 5
 runs = 1000
 
 [rpc_endpoints]
-BOT = "${BOT_RPC_URL}"
-BOT_sepolia = "https://forno.BOT-sepolia.BOT-testnet.org"
+celo = "${CELO_RPC_URL}"
+celo_sepolia = "https://forno.celo-sepolia.celo-testnet.org"
 botchain = "${BOTCHAIN_RPC_URL}"
 [etherscan]
-BOT_sepolia = { key = "any", url = "https://BOT-sepolia.blockscout.com/api/" }
-BOT = { key = "${BOTSCAN_API_KEY}", url = "https://api.BOTscan.io/api" }
-botchain = { key = "any", url = "https://scan.bohr.life/api", chain = 968 }
+celo_sepolia = { key = "any", url = "https://celo-sepolia.blockscout.com/api/" }
+celo = { key = "${CELOSCAN_API_KEY}", url = "https://api.celoscan.io/api" }
+botchain = { key = "any", url = "https://scan.bohr.life/api", chain = 677 }

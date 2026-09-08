@@ -36,7 +36,7 @@ contract Deploy is Script {
     function run() external {
         // ── Env ───────────────────────────────────────────────────────────────
         address agentWallet     = vm.envAddress("AGENT_ADDRESS");
-        uint256 subscriptionFee = vm.envOr("SUBSCRIPTION_FEE_WEI", uint256(2.5 ether)); // ~$5 at $2/BOT
+        uint256 subscriptionFee = vm.envOr("SUBSCRIPTION_FEE_WEI", uint256(0.5 ether)); // ~$5 at $2/BOT
 
         // ── Deploy factory ──────────────────────────────────────────────────────
         vm.startBroadcast();

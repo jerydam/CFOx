@@ -198,7 +198,7 @@ class Web3Service:
     """
 
     def __init__(self):
-        rpc_url = os.getenv("RPC_URL", "https://rpc.bohr.life")
+        rpc_url = os.getenv("RPC_URL", "https://rpc.botchain.ai")
         self.w3 = Web3(Web3.HTTPProvider(rpc_url))
         self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 

@@ -633,10 +633,10 @@ export default function DocsPage() {
             ]} />
             {/* <h3 className="docs-h3">Adding Botchain to MetaMask</h3>
             <CodeBlock>{`Network name:  BOT Chain
-RPC URL:       https://rpc.bohr.life
+RPC URL:       https://rpc.botchain.ai
 Chain ID:      677
 Currency:      BOT
-Explorer:      https://explorer.bohr.life`}</CodeBlock> */}
+Explorer:      https://explorer.botchain.ai`}</CodeBlock> */}
             <p className="docs-p">
               WalletConnect is available if a <Code>NEXT_PUBLIC_WC_PROJECT_ID</Code>{' '}
               is set in the frontend <Code>.env</Code>. Without it, only injected
